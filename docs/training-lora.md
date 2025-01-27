@@ -84,6 +84,58 @@ HTDemucs combines three key components:
 
 ## Genre-Specific Training
 
+## Extended Source Separation Configuration
+
+For 5-source separation with specialized drum components:
+
+```yaml
+dset:
+  sources: ["instruments", "kick", "vocal", "bass", "hihat"]  # 5-source configuration
+  sample_rate: 44100  # Match your audio files
+  channels: 2  # Stereo processing
+  
+htdemucs:
+  # Enhanced LoRA settings for specialized drum separation
+  lora_rank_mode: heuristic
+  lora_rank: 8  # Higher base rank for detailed separation
+  
+  # Layer-specific ranks optimized for drum component isolation
+  layer_ranks:
+    # Early layers need higher ranks to learn detailed features
+    "encoder.0.*": 16      # Critical for initial feature extraction
+    "encoder.1.*": 12      # Focus on rhythmic and timbral patterns
+    "transformer.*": 12    # Attention to temporal relationships
+    "decoder.0.*": 12     # Detailed reconstruction
+    "decoder.1.*": 8      # Refined separation
+    "decoder.2.*": 6      # Final adjustments
+  
+  # Audio processing optimized for percussion
+  nfft: 4096              # Larger FFT for better frequency resolution
+  segment: 12             # Longer segments for pattern recognition
+  hop_length: 1024        # Overlap for smoother transitions
+  
+  # Training settings
+  batch_size: 32          # Adjust based on GPU memory
+  gradient_clip: 0.5      # Prevent gradient explosions
+  mixed_precision: true   # Improve training speed
+```
+
+### Training Command for 5-Source Model
+
+```bash
+# Start from pre-trained 4-source model and adapt to 5 sources with specialized drum separation
+dora run -d -f htdemucs \
+  continue_from=htdemucs \
+  htdemucs.lora_rank=8 \
+  variant=finetune \
+  dset.sources='["instruments", "kick", "vocal", "bass", "hihat"]' \
+  dset.wav="path/to/5stem_dataset" \
+  optim.lr=5e-5 \
+  optim.warmup_steps=500 \
+  htdemucs.nfft=4096 \
+  htdemucs.segment=12
+```
+
 ### Dataset Requirements and Recommendations
 
 1. **Dataset Size Recommendations**
@@ -107,22 +159,15 @@ HTDemucs combines three key components:
 
 1. **Organize Your Training Data**
    ```
-   tech_house_data/
+   dataset/
    ├── train/                      # Training dataset directory
    │   ├── track1/                 # Each track in its own folder
    │   │   ├── mixture.wav        # Original mixed track
-   │   │   ├── drums.wav         # Isolated drums stem
-   │   │   │                     # - Include kick, snare, hi-hats
-   │   │   │                     # - Clean separation without bleed
-   │   │   ├── bass.wav          # Isolated bass stem
-   │   │   │                     # - Include sub bass and bass synths
-   │   │   │                     # - Clean low-end separation
-   │   │   ├── other.wav         # Other musical elements
-   │   │   │                     # - Synths, pads, effects
-   │   │   │                     # - Atmospheric elements
-   │   │   └── vocals.wav        # Vocal elements
-   │   │                         # - Main vocals, vocal chops
-   │   │                         # - Processed vocal effects
+   │   │   ├── instruments.wav    # All instruments except drums/bass
+   │   │   ├── kick.wav          # All drums except hi-hats
+   │   │   ├── vocal.wav         # All vocal elements
+   │   │   ├── bass.wav          # Bass instruments
+   │   │   └── hihat.wav         # Hi-hat patterns only
    │   ├── track2/
    │   │   ├── mixture.wav
    │   │   └── ...
@@ -141,22 +186,33 @@ HTDemucs combines three key components:
    - Consistent loudness levels
 
 3. **Stem Quality Guidelines**
-   - Drums:
-     * Clean transients
-     * No bass bleed
-     * Properly separated percussion
+   - Instruments:
+     * Clean separation from drums and bass
+     * Well-preserved melodic content
+     * Minimal rhythmic bleed-through
+   - Kick:
+     * All drum elements except hi-hats
+     * Clean transients for all percussion
+     * No hi-hat bleed in drum hits
+   - Vocal:
+     * Clear separation from instruments
+     * All vocal processing included
+     * No instrumental bleed
    - Bass:
      * Clear sub frequencies
      * Minimal mid-range bleed
      * Consistent phase alignment
-   - Other:
-     * Well-separated synths
-     * Clean effect tails
-     * Minimal cross-contamination
-   - Vocals:
-     * Clear separation from effects
-     * Includes all vocal processing
-     * No instrumental bleed
+   - Hi-hat:
+     * Isolated hi-hat patterns only
+     * Clean cymbal separation
+     * No bleed from other drums
+
+4. **Special Considerations for Drum Component Separation**
+   - Ensure complete isolation of hi-hats from other drums
+   - Maintain phase coherence between kick and hi-hat stems
+   - Verify no hi-hat artifacts in kick stem
+   - Check for proper transient preservation in both stems
+   - Monitor frequency crossover points between components
 
 ### Configuration Setup
 

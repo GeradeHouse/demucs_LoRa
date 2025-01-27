@@ -39,6 +39,8 @@ LoRA Integration:
    - Uniform Mode: Consistent rank across all layers (baseline)
    - Heuristic Mode: Layer-specific ranks based on architectural importance:
      * Critical layers (early encoder, transformer): higher ranks (8-16)
+       - Enhanced ranks for drum separation layers
+       - Specialized attention for transient detection
      * Middle processing layers: medium ranks (4-8)
      * Final refinement layers: lower ranks (2-4)
    - Gradient-based Mode: (Future) Dynamic rank adaptation based on layer sensitivity
@@ -48,6 +50,7 @@ LoRA Integration:
    - Selective freezing of base model weights
    - Dropout regularization for robust adaptation
    - Per-layer profiling capabilities for optimization
+   - Support for fine-grained source separation (e.g., drum sub-components)
 
 3. Layer Coverage:
    - Convolutional layers (1D/2D, standard/transposed)
@@ -61,6 +64,15 @@ Technical Optimizations:
 - Efficient cross-attention implementation
 - Flexible sparsity patterns for attention
 - Modular design for easy extension
+
+Source Separation Capabilities:
+- Standard 4-source separation (bass, drums, vocals, other)
+- Extended 5-source separation with specialized components:
+  * Instruments: All musical instruments except drums and bass
+  * Kick: All drums and percussion except hi-hats
+  * Vocals: All vocal elements
+  * Bass: Low-frequency instruments and bass lines
+  * Hi-hat: Isolated hi-hat patterns and cymbals
 
 References:
 - Original Demucs: https://arxiv.org/abs/1911.13254
