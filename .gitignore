@@ -14,4 +14,8 @@ Session.vim
 /trash
 /misc
 /mdx
+/.lh
+/.history
 .mypy_cache
+.lh/demucs/htdemucs.py.json
+.gitignore

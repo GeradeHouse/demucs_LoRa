@@ -557,11 +557,91 @@ class CrossTransformerEncoder(nn.Module):
         global_window: int = 50,
         auto_sparsity: bool = False,
         sparsity: float = 0.95,
+        # LoRA parameters
+        lora_rank: int = 4,
+        lora_alpha: float = 1.0,
+        lora_dropout: float = 0.1,
+        lora_alpha_warmup: bool = True,  # Enable gradual alpha warmup
+        lora_bottleneck_dim: tp.Optional[int] = None,  # Optional bottleneck constraint
     ):
         super().__init__()
         """
+        CrossTransformerEncoder with LoRA support and parameter validation.
+        
+        Args:
+            dim: Model dimension
+            emb: Type of positional embedding ('sin', 'cape', or 'scaled')
+            hidden_scale: Scale factor for feedforward hidden dimension
+            num_heads: Number of attention heads
+            num_layers: Number of transformer layers
+            cross_first: Whether to start with cross attention
+            dropout: Dropout probability
+            lora_rank: Rank for LoRA adaptation matrices
+            lora_alpha: Scaling factor for LoRA updates
+            lora_dropout: Dropout probability for LoRA layers
+            
+        The alpha scaling factor for LoRA updates is validated against the model
+        dimension to ensure stable training. For transformer layers, alpha should
+        generally not exceed dim/num_heads to maintain proper scaling of attention
+        mechanisms.
         """
         assert dim % num_heads == 0
+        
+        # Validate LoRA parameters for transformer layers
+        head_dim = dim // num_heads
+        
+        # Check if LoRA is disabled
+        self.use_lora = lora_rank > 0
+        if not self.use_lora:
+            return
+            
+        # Validate alpha bounds and scaling
+        if lora_alpha <= 0:
+            raise ValueError(f"LoRA alpha ({lora_alpha}) must be positive")
+            
+        if lora_alpha > head_dim:
+            raise ValueError(
+                f"LoRA alpha ({lora_alpha}) should not exceed head dimension "
+                f"({head_dim}=dim({dim})/num_heads({num_heads})) in transformer layers "
+                "to maintain stable attention scaling"
+            )
+            
+        # Handle edge case when dim equals num_heads
+        if dim == num_heads:
+            if lora_alpha > 1.0:
+                raise ValueError(
+                    f"When dim equals num_heads, LoRA alpha ({lora_alpha}) should not "
+                    "exceed 1.0 to prevent attention score explosion"
+                )
+                
+        # Validate rank and bottleneck dimension
+        if lora_rank > min(dim, head_dim):
+            raise ValueError(
+                f"LoRA rank ({lora_rank}) should not exceed min(dim, head_dim) "
+                f"({min(dim, head_dim)}) to prevent overparameterization"
+            )
+            
+        if lora_bottleneck_dim is not None:
+            if lora_rank > lora_bottleneck_dim:
+                raise ValueError(
+                    f"LoRA rank ({lora_rank}) should not exceed bottleneck dimension "
+                    f"({lora_bottleneck_dim}) for efficient adaptation"
+                )
+            
+        # Check dropout interaction
+        if lora_dropout > 0 and dropout > 0:
+            if lora_dropout + dropout > 0.8:
+                raise ValueError(
+                    f"Combined LoRA dropout ({lora_dropout}) and model dropout ({dropout}) "
+                    "should not exceed 0.8 to maintain stable training"
+                )
+                
+        # Initialize alpha warmup
+        self.lora_alpha_warmup = lora_alpha_warmup
+        if lora_alpha_warmup:
+            self.current_alpha = 0.0  # Start from 0
+            self.target_alpha = lora_alpha  # Target value
+            self.register_buffer('alpha_scale', torch.tensor(0.0))  # Warmup progress
 
         hidden_dim = int(dim * hidden_scale)
 
@@ -619,6 +699,10 @@ class CrossTransformerEncoder(nn.Module):
             "sparsity": sparsity,
             "auto_sparsity": auto_sparsity,
             "batch_first": True,
+            # Add validated LoRA parameters only if enabled
+            **({"lora_rank": lora_rank,
+                "lora_alpha": lora_alpha,
+                "lora_dropout": lora_dropout} if self.use_lora else {}),
         }
 
         kwargs_classic_encoder = dict(kwargs_common)
@@ -712,6 +796,40 @@ class CrossTransformerEncoder(nn.Module):
 
         return pos_emb
 
+    def is_lora_enabled(self) -> bool:
+        """Check if LoRA adaptation is enabled and properly configured.
+        
+        Returns:
+            bool: True if LoRA is enabled and properly configured, False otherwise
+        """
+        return hasattr(self, 'use_lora') and self.use_lora
+        
+    def get_current_lora_alpha(self) -> float:
+        """Get the current LoRA alpha value considering warmup.
+        
+        Returns:
+            float: Current alpha value after warmup scaling
+        """
+        if not self.lora_alpha_warmup:
+            return self.target_alpha
+        return self.current_alpha + (self.target_alpha - self.current_alpha) * self.alpha_scale
+        
+    def update_lora_alpha(self, step: int, total_steps: int):
+        """Update LoRA alpha value during warmup.
+        
+        Args:
+            step: Current training step
+            total_steps: Total number of warmup steps
+        """
+        if not self.lora_alpha_warmup:
+            return
+            
+        # Linear warmup schedule
+        self.alpha_scale.data = torch.tensor(
+            min(1.0, step / max(1, total_steps)),
+            device=self.alpha_scale.device
+        )
+        
     def make_optim_group(self):
         group = {"params": list(self.parameters()), "weight_decay": self.weight_decay}
         if self.lr is not None:
