@@ -226,10 +226,12 @@ class LoRALayerBase(nn.Module):
         # Scale initialization by 1/sqrt(fan_in) for stable gradients
         scale = math.sqrt(1.0 / fan_in)
         
+        # Define max_attempts in the outer scope
+        max_attempts = 10
+        
         # Initialize U and V with validated scheme
         def init_weight(tensor, scale):
             # Validate initialization doesn't produce extreme values
-            max_attempts = 10
             for _ in range(max_attempts):
                 nn.init.normal_(tensor, std=scale)
                 if tensor.abs().max() < 2.0:  # Check for reasonable bounds
