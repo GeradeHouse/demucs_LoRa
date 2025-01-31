@@ -1,19 +1,63 @@
 # @package _global_
 
+defaults:
+  - _self_
+  - dset: musdb44
+  - svd: default
+  - variant: default
+  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+
 # Dataset configuration
 dset:
   sources: ["other", "kick", "vocal", "bass", "hihat"]
+  # musdb: /checkpoint/defossez/datasets/musdbhq  # Base dataset path
+  musdb_samplerate: 44100
+  use_musdb: false   # Set to false since we're using custom dataset
+  wav: "path/to/your/5stem/dataset"  # Set your dataset path here
+  wav2:  # Optional second dataset
+  segment: 12  # Segment length in seconds # Not sure whether this should be used for the 5 stem LoRA training
+  shift: 1
+  train_valid: false
+  full_cv: true
   samplerate: 44100
   channels: 2
-  segment: 12  # Segment length in seconds for training
+  normalize: true
+  metadata: ./metadata
+  sources: ["other", "kick", "vocal", "bass", "hihat"]  # 5-source configuration
+  valid_samples: null
+
+# Model and training configuration
+continue_from: "htdemucs"  # Continue from pre-trained HTDemucs
+continue_pretrained: null  # No additional pretrained model
+continue_best: true       # Use best checkpoint
+continue_opt: false      # Don't continue optimizer state
+
+# Training settings
+epochs: 360
+batch_size: 32
+max_batches: null
+mixed_precision: true
+
+# Optimizer settings
+optim:
+  lr: 5e-5              # Lower learning rate for fine-tuning
+  momentum: 0.9
+  beta2: 0.999
+  loss: l1              # L1 loss typically better for audio
+  optim: adam
+  weight_decay: 0
+  clip_grad: 0.5
+  warmup_steps: 1000
+  scheduler: cosine
 
 # HTDemucs model configuration
 htdemucs:
   # Core architecture
-  channels: 64              # Initial number of channels
-  channels_time: null       # Optional different channels for time branch
-  growth: 2                 # Channel growth per layer
-  depth: 4                  # Number of encoder/decoder layers
+  channels: 48              # Base number of channels
+  channels_time: null       # Time branch channels
+  growth: 2                 # Channel growth factor
+  depth: 4                  # Number of layers
   
   # STFT and processing
   nfft: 4096               # FFT size for better frequency resolution
@@ -61,6 +105,10 @@ htdemucs:
   t_max_positions: 10000 # Max positions for scaled embedding
   t_max_period: 10000.0  # Max period for sin embedding
   t_weight_pos_embed: 1.0 # Position embedding weight
+  t_cape_mean_normalize: true
+  t_cape_augment: true
+  t_cape_glob_loc_scale: [5000.0, 1.0, 1.4]
+  t_sin_random_shift: 0
   
   # Transformer normalization
   t_norm_in: true       # Norm before transformer
@@ -68,14 +116,20 @@ htdemucs:
   t_group_norm: false   # Group norm in encoder layers
   t_norm_first: true    # Norm before attention
   t_norm_out: true      # Final group norm
+  t_weight_decay: 0.0
+  t_lr: null
   
   # Sparsity settings
   t_sparse_self_attn: false  # Sparse self attention
   t_sparse_cross_attn: false # Sparse cross attention
   t_mask_type: "diag"        # Attention mask type
+  t_mask_random_seed: 42     # Random seed for mask
   t_sparse_attn_window: 500  # Local attention window
   t_global_window: 100       # Global attention window
   t_sparsity: 0.95          # Sparsity level
+  t_auto_sparsity: false
+  t_cross_first: false
+
   
   # LoRA specific settings
   lora_rank: 8              # Base rank for LoRA adaptation
@@ -107,3 +161,40 @@ training:
     lr: 3e-4
     warmup_steps: 1000
     scheduler: cosine
+
+ SVD settings for LoRA
+svd:
+  penalty: 0
+  min_size: 0.1
+  dim: 1
+  niters: 2
+  powm: false
+  proba: 1
+  conv_only: false
+  convtr: false
+  bs: 1
+
+# Quantization settings (typically not used during training)
+quant:
+  diffq: null
+  qat: null
+  min_size: 0.2
+  group_size: 8
+
+# Output and logging
+dora:
+  dir: outputs
+  exclude: ["misc.*", "slurm.*", 'test.reval', 'flag', 'dset.backend']
+
+# Cluster settings if using SLURM
+slurm:
+  time: 4320
+  constraint: volta32gb
+  setup: ['module load cudnn/v8.4.1.50-cuda.11.6 NCCL/2.11.4-6-cuda.11.6 cuda/11.6']
+
+# Logging configuration
+hydra:
+  job_logging:
+    formatters:
+      colorlog:
+        datefmt: "%m-%d %H:%M:%S"
