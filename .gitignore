@@ -20,3 +20,5 @@ Session.vim
 .lh/demucs/htdemucs.py.json
 .gitignore
 .vscode/extensions.json
+username.sh
+/dataset
