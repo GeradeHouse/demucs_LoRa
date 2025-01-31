@@ -9,6 +9,7 @@
 # LICENSE file in the root directory of this source tree.
 # First author is Simon Rouard.
 # LoRA modifications by GeradeHouse.
+# January 2025
 
 """
 HTDemucs: Hybrid Transformer Demucs Model with LoRA Integration
