@@ -1,0 +1,109 @@
+# @package _global_
+
+# Dataset configuration
+dset:
+  sources: ["other", "kick", "vocal", "bass", "hihat"]
+  samplerate: 44100
+  channels: 2
+  segment: 12  # Segment length in seconds for training
+
+# HTDemucs model configuration
+htdemucs:
+  # Core architecture
+  channels: 64              # Initial number of channels
+  channels_time: null       # Optional different channels for time branch
+  growth: 2                 # Channel growth per layer
+  depth: 4                  # Number of encoder/decoder layers
+  
+  # STFT and processing
+  nfft: 4096               # FFT size for better frequency resolution
+  wiener_iters: 0          # Number of Wiener filter iterations
+  end_iters: 0             # Iterations during training
+  wiener_residual: false   # Add residual source before Wiener
+  cac: true                # Complex as channels mode
+  
+  # Architecture features
+  rewrite: true            # Add 1x1 convolutions to each layer
+  multi_freqs: []          # Frequency band splitting
+  multi_freqs_depth: 3     # Depth for multi-frequency processing
+  freq_emb: 0.2           # Frequency embedding weight
+  emb_scale: 10           # Embedding learning rate scale
+  emb_smooth: true        # Initialize with smooth embedding
+  
+  # Convolution settings
+  kernel_size: 8          # Kernel size for encoder/decoder
+  stride: 4              # Stride for frequency layers
+  time_stride: 2         # Stride for final time layer
+  context: 1             # Context for decoder 1x1 conv
+  context_enc: 0         # Context for encoder 1x1 conv
+  
+  # Normalization
+  norm_starts: 4         # Layer where group norm starts
+  norm_groups: 4         # Number of groups for group norm
+  
+  # DConv settings
+  dconv_mode: 1          # 1=encoder only, 2=decoder only, 3=both
+  dconv_depth: 2         # Depth of residual DConv branch
+  dconv_comp: 8          # Compression of DConv branch
+  dconv_init: 1e-3       # Initial scale for DConv LayerScale
+  
+  # Transformer settings
+  bottom_channels: 0      # Channels before transformer
+  t_layers: 5            # Number of transformer layers
+  t_hidden_scale: 4.0    # Hidden layer scale
+  t_heads: 8            # Number of attention heads
+  t_dropout: 0.0        # Transformer dropout
+  t_layer_scale: true   # Use layer scale in transformer
+  t_gelu: true         # Use GELU activation
+  
+  # Positional embedding
+  t_emb: "sin"          # Positional embedding type
+  t_max_positions: 10000 # Max positions for scaled embedding
+  t_max_period: 10000.0  # Max period for sin embedding
+  t_weight_pos_embed: 1.0 # Position embedding weight
+  
+  # Transformer normalization
+  t_norm_in: true       # Norm before transformer
+  t_norm_in_group: false # Group norm across time
+  t_group_norm: false   # Group norm in encoder layers
+  t_norm_first: true    # Norm before attention
+  t_norm_out: true      # Final group norm
+  
+  # Sparsity settings
+  t_sparse_self_attn: false  # Sparse self attention
+  t_sparse_cross_attn: false # Sparse cross attention
+  t_mask_type: "diag"        # Attention mask type
+  t_sparse_attn_window: 500  # Local attention window
+  t_global_window: 100       # Global attention window
+  t_sparsity: 0.95          # Sparsity level
+  
+  # LoRA specific settings
+  lora_rank: 8              # Base rank for LoRA adaptation
+  lora_alpha: 1.0           # Scaling factor for updates
+  lora_dropout: 0.1         # Dropout for regularization
+  layer_ranks:              # Layer-specific ranks
+    "encoder.0.*": 16       # Initial feature extraction
+    "encoder.1.*": 12       # Early processing
+    "transformer.*": 12     # Transformer layers
+    "decoder.0.*": 12      # High-level reconstruction
+    "decoder.1.*": 8       # Mid-level details
+    "decoder.2.*": 6       # Fine details
+  lora_rank_mode: "heuristic"  # Rank allocation strategy
+  
+  # Memory optimization
+  enable_checkpointing: true   # For large models
+  enable_profiling: false      # Memory tracking
+  
+  # Weight initialization
+  rescale: 0.1               # Weight rescaling factor
+
+# Training settings
+training:
+  batch_size: 32
+  gradient_clip: 0.5
+  mixed_precision: true
+  epochs: 360
+  optim:
+    lr: 3e-4
+    warmup_steps: 1000
+    scheduler: cosine

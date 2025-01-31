@@ -35,7 +35,7 @@ source demucs_env/bin/activate
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # Clone Demucs repository
-git clone https://github.com/facebookresearch/demucs.git
+git clone https://github.com/GeradeHouse/demucs_LoRa.git
 cd demucs
 
 # Install requirements
@@ -90,7 +90,7 @@ For 5-source separation with specialized drum components:
 
 ```yaml
 dset:
-  sources: ["instruments", "kick", "vocal", "bass", "hihat"]  # 5-source configuration
+  sources: ["other", "kick", "vocal", "bass", "hihat"]  # 5-source configuration
   sample_rate: 44100  # Match your audio files
   channels: 2  # Stereo processing
   
@@ -128,7 +128,7 @@ dora run -d -f htdemucs \
   continue_from=htdemucs \
   htdemucs.lora_rank=8 \
   variant=finetune \
-  dset.sources='["instruments", "kick", "vocal", "bass", "hihat"]' \
+  dset.sources='["other", "kick", "vocal", "bass", "hihat"]' \
   dset.wav="path/to/5stem_dataset" \
   optim.lr=5e-5 \
   optim.warmup_steps=500 \
@@ -163,7 +163,7 @@ dora run -d -f htdemucs \
    ├── train/                      # Training dataset directory
    │   ├── track1/                 # Each track in its own folder
    │   │   ├── mixture.wav        # Original mixed track
-   │   │   ├── instruments.wav    # All instruments except drums/bass
+   │   │   ├── other.wav         # All instruments except drums/bass
    │   │   ├── kick.wav          # All drums except hi-hats
    │   │   ├── vocal.wav         # All vocal elements
    │   │   ├── bass.wav          # Bass instruments
@@ -186,7 +186,7 @@ dora run -d -f htdemucs \
    - Consistent loudness levels
 
 3. **Stem Quality Guidelines**
-   - Instruments:
+   - Other:
      * Clean separation from drums and bass
      * Well-preserved melodic content
      * Minimal rhythmic bleed-through

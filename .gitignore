@@ -19,3 +19,4 @@ Session.vim
 .mypy_cache
 .lh/demucs/htdemucs.py.json
 .gitignore
+.vscode/extensions.json
