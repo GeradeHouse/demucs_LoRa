@@ -21,7 +21,7 @@ dset:
   channels: 2
   normalize: true
   metadata: ./metadata
-  sources: ['other', 'kick', 'vocal', 'bass', 'hihat']  # Updated 5-source configuration
+  sources: ['drums', 'bass', 'other', 'vocals']
   valid_samples: # valid dataset size
   backend: null   # if provided select torchaudio backend.
 
