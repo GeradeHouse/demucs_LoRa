@@ -132,6 +132,11 @@ htdemucs:
   lora_rank: 8              # Base rank for LoRA adaptation
   lora_alpha: 1.0           # Scaling factor for updates
   lora_dropout: 0.1         # Dropout for regularization
+  source_linkage:
+    other: other
+    drums: kick
+    vocals: vocals
+    bass: bass
   layer_ranks:              # Layer-specific ranks
     "encoder.0.*": 16       # Initial feature extraction
     "encoder.1.*": 12       # Early processing
