@@ -6,6 +6,7 @@ This guide covers how to train HT-Demucs models using Low-Rank Adaptation (LoRA)
 - [Setup and Installation](#setup-and-installation)
 - [Datasets](#datasets)
 - [LoRA Configuration](#lora-configuration)
+- [Handling Source Count Mismatch and Source Linkage](#handling-source-count-mismatch-and-source-linkage)
 - [Training Process](#training-process)
 - [Model Architecture](#model-architecture)
 - [Best Practices](#best-practices)
@@ -13,117 +14,495 @@ This guide covers how to train HT-Demucs models using Low-Rank Adaptation (LoRA)
 - [Advanced Configuration](#advanced-configuration)
 - [Troubleshooting](#troubleshooting)
 
+---
+
 ## Setup and Installation
 
 ### Setting up Python Environment
 
-1. Create a virtual environment:
-```bash
-# Create virtual environment
-python -m venv demucs_env
+1. **Create a virtual environment:**
+   ```bash
+   # Create virtual environment
+   python -m venv demucs_env
 
-# Activate on Windows
-demucs_env\Scripts\activate
+   # Activate on Windows
+   demucs_env\Scripts\activate
 
-# Activate on Linux/Mac
-source demucs_env/bin/activate
+   # Activate on Linux/Mac
+   source demucs_env/bin/activate
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   # Install PyTorch with CUDA support (adjust CUDA version if needed)
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+   # Clone the Demucs_LoRa repository
+   git clone https://github.com/GeradeHouse/demucs_LoRa.git
+   cd demucs_LoRa
+
+   # Install base requirements
+   pip install -r requirements.txt
+
+   # Install additional dependencies for LoRA
+   pip install einops xformers
+   ```
+
+This setup ensures that you have both the standard Demucs environment plus the necessary packages for LoRA fine-tuning.
+
+---
+
+## Datasets
+
+### Organizing Your Data
+
+When performing source separation, each track in your dataset usually includes a `mixture.wav` file and separate stems for each source. Ensure each track’s folder is laid out like this:
+
+```
+dataset/
+├── train/
+│   ├── track1/
+│   │   ├── mixture.wav
+│   │   ├── other.wav
+│   │   ├── kick.wav
+│   │   ├── vocals.wav
+│   │   ├── bass.wav
+│   │   └── hihat.wav
+│   ├── track2/
+│   │   ├── mixture.wav
+│   │   └── ...
+│   └── ...
+└── valid/
+    ├── track1/
+    │   ├── mixture.wav
+    │   └── ...
+    └── ...
 ```
 
-2. Install dependencies:
-```bash
-# Install PyTorch with CUDA support (adjust CUDA version if needed)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+1. **Alignment:** All stems must be perfectly time-aligned.  
+2. **Integrity:** The sum of all stems should recreate the mixture without clipping.  
+3. **Format:** Use uncompressed WAV files (16- or 24-bit) with a sample rate of 44.1kHz (or 48kHz).  
 
-# Clone Demucs repository
-git clone https://github.com/GeradeHouse/demucs_LoRa.git
-cd demucs
+Having your data in this structure makes it easier for Demucs (and LoRA training) to locate and use the stems.
 
-# Install requirements
-pip install -r requirements.txt
+---
 
-# Install additional dependencies for LoRA
-pip install einops xformers
-```
+## LoRA Configuration
 
-## Understanding HTDemucs Architecture
+LoRA (Low-Rank Adaptation) allows you to fine-tune a large pretrained model by adding a small number of trainable parameters. This drastically reduces memory usage and training time compared to full fine-tuning.
 
-HTDemucs combines three key components:
+Key LoRA parameters include:
 
-1. **Dual-Path Processing**
-   - Frequency domain: Processes spectrograms through frequency-domain convolutions
-     * STFT-based analysis for frequency patterns
-     * Specialized handling of bass and percussion
-   - Time domain: Parallel processing of raw waveforms
-     * Direct waveform analysis for temporal features
-     * Preserves phase information
-   - Cross-path fusion: Merges information between paths at strategic points
-     * Combines spectral and temporal features
-     * Maintains coherence between domains
+- **lora_rank:** Base rank used for the low-rank adaptation matrices. (e.g., 4, 8, 16)
+- **lora_alpha:** A scaling factor that multiplies the LoRA updates before adding them to the base weights.
+- **lora_dropout:** Dropout applied to the LoRA layers for regularization.
+- **lora_rank_mode:** How ranks are assigned to each layer (e.g., “uniform,” “heuristic,” “gradient”).
 
-2. **Transformer Integration**
-   - Cross-attention between time and frequency representations
-     * Learns long-term dependencies
-     * Captures musical structure
-   - Position-aware processing through various embedding options
-     * Handles varying song lengths
-     * Maintains temporal context
-   - Optional sparse attention patterns for efficiency
-     * Reduces memory usage
-     * Focuses on relevant time-frequency relationships
+---
 
-3. **LoRA Adaptation**
-   - Memory-efficient parameter updates through low-rank decomposition
-     * Reduces training parameters by 95%+
-     * Enables rapid fine-tuning
-   - Selective freezing of base model weights
-     * Preserves general separation capabilities
-     * Allows focused genre adaptation
-   - Layer-specific rank allocation for optimal adaptation
-     * Higher ranks for critical layers
-     * Efficient parameter distribution
+### Example Configuration (Split into Sections)
 
-## Genre-Specific Training
+Below we split the **five_stem_lora.yaml** into smaller sections and explain each relevant block. This file is a sample configuration for training or fine-tuning a 5‑source HTDemucs model with LoRA.
 
-## Extended Source Separation Configuration
-
-For 5-source separation with specialized drum components:
+#### 1. Defaults and Dataset
 
 ```yaml
-dset:
-  sources: ["other", "kick", "vocals", "bass", "hihat"]  # 5-source configuration
-  sample_rate: 44100  # Match your audio files
-  channels: 2  # Stereo processing
-  
-htdemucs:
-  # Enhanced LoRA settings for specialized drum separation
-  lora_rank_mode: heuristic
-  lora_rank: 8  # Higher base rank for detailed separation
-  
-  # Layer-specific ranks optimized for drum component isolation
-  layer_ranks:
-    # Early layers need higher ranks to learn detailed features
-    "encoder.0.*": 16      # Critical for initial feature extraction
-    "encoder.1.*": 12      # Focus on rhythmic and timbral patterns
-    "transformer.*": 12    # Attention to temporal relationships
-    "decoder.0.*": 12     # Detailed reconstruction
-    "decoder.1.*": 8      # Refined separation
-    "decoder.2.*": 6      # Final adjustments
-  
-  # Audio processing optimized for percussion
-  nfft: 4096              # Larger FFT for better frequency resolution
-  segment: 12             # Longer segments for pattern recognition
-  hop_length: 1024        # Overlap for smoother transitions
-  
-  # Training settings
-  batch_size: 32          # Adjust based on GPU memory
-  gradient_clip: 0.5      # Prevent gradient explosions
-  mixed_precision: true   # Improve training speed
-```
+#conf\variant\five_stem_lora.yaml
+# @package _global_
 
-### Training Command for 5-Source Model
+defaults:
+  - _self_
+  - ../dset/musdb44
+  - ../svd/default
+```
+- **defaults:** Points to other configuration files or defaults used alongside this one. `_self_` means “use the current file,” and the others reference additional configurations like musdb44 or default SVD settings.
+
+```yaml
+# Dataset configuration
+dset:
+  sources: ["other", "kick", "vocals", "bass", "hihat"]
+  musdb_samplerate: 44100
+  use_musdb: false
+  wav: "./dataset"
+  wav2:
+  segment: 12
+  shift: 1
+  train_valid: false
+  full_cv: true
+  samplerate: 44100
+  channels: 2
+  normalize: true
+  metadata: ./metadata
+  valid_samples: null
+```
+- **sources:** Lists the stems you want to train for—here, we have 5 stems: *other*, *kick*, *vocals*, *bass*, and *hihat*.  
+- **samplerate:** Must match your audio files.  
+- **wav:** Directory containing your dataset (relative to this config).  
+- **segment:** Length of audio segments (in seconds) used per training sample.  
+- **use_musdb:** Set to `false` if you are providing a custom dataset.
+
+#### 2. Model and Training Configuration
+
+```yaml
+# Model and training configuration
+continue_from: "htdemucs"
+continue_pretrained: null
+continue_best: true
+continue_opt: false
+```
+- **continue_from:** Name of the pretrained checkpoint or model you want to load. Here, "htdemucs" implies we start from a standard 4‑source model.  
+- **continue_best:** If `true`, loads the best checkpoint rather than the last checkpoint.  
+- **continue_opt:** If `true`, you’d also restore the previous optimizer state, but here it’s disabled.
+
+```yaml
+# Training settings
+epochs: 360
+batch_size: 16
+max_batches: null
+mixed_precision: true
+```
+- **epochs:** The number of total training epochs.  
+- **batch_size:** Number of audio segments processed simultaneously on each training step.  
+- **mixed_precision:** If `true`, uses half-precision to speed up training and reduce memory usage.
+
+#### 3. Optimizer Settings
+
+```yaml
+optim:
+  lr: 5e-5
+  momentum: 0.9
+  beta2: 0.999
+  loss: l1
+  optim: adam
+  weight_decay: 0
+  clip_grad: 0.5
+  warmup_steps: 1000
+  scheduler: cosine
+```
+- **lr:** Learning rate for the optimizer. `5e-5` is commonly used for fine-tuning.  
+- **loss:** L1 loss is typical for audio source separation.  
+- **clip_grad:** Enables gradient clipping at 0.5 to prevent overly large updates.  
+- **warmup_steps:** Gradually increases the learning rate from 0 to `lr` during the first 1000 steps.  
+- **scheduler:** Here, `"cosine"` gradually decreases the learning rate following a cosine curve.
+
+#### 4. HTDemucs Model Configuration
+
+```yaml
+htdemucs:
+  # Core architecture
+  channels: 48
+  channels_time: null
+  growth: 2
+  depth: 4
+```
+- **channels:** Base number of channels in the network (starting point).  
+- **depth:** Number of layers in the encoder and decoder.
+
+```yaml
+  # STFT and processing parameters
+  nfft: 4096
+  wiener_iters: 0
+  end_iters: 0
+  wiener_residual: false
+  cac: true
+```
+- **nfft:** Size of FFT used for frequency processing (e.g., 4096).  
+- **cac (Complex-as-channels):** If `true`, treats real/imag parts as separate channels.  
+- **wiener_iters:** Wiener filtering is disabled here (set to 0).
+
+```yaml
+  # Architecture features
+  rewrite: true
+  multi_freqs: []
+  multi_freqs_depth: 3
+  freq_emb: 0.2
+  emb_scale: 10
+  emb_smooth: true
+```
+- **rewrite:** Adds a 1×1 convolution to each layer to “rewrite” features.  
+- **freq_emb:** Adds frequency embeddings with a weight factor of 0.2.  
+- **emb_scale / emb_smooth:** Controls how embeddings are scaled and initialized.
+
+```yaml
+  # Convolution settings
+  kernel_size: 8
+  stride: 4
+  time_stride: 2
+  context: 1
+  context_enc: 0
+```
+- **kernel_size:** The size of the convolution filter in each layer.  
+- **stride:** How much to “hop” across the frequency dimension.  
+- **time_stride:** Used in time-domain layers.  
+- **context:** Additional context in the decoder with 1×1 convolutions.
+
+```yaml
+  # Normalization settings
+  norm_starts: 4
+  norm_groups: 4
+```
+- **norm_starts:** At which layer index normalization begins.  
+- **norm_groups:** Sets how many groups to use for GroupNorm.
+
+```yaml
+  # DConv (Depthwise-Separable Convolution) settings
+  dconv_mode: 1
+  dconv_depth: 2
+  dconv_comp: 8
+  dconv_init: 1e-3
+```
+- **dconv_mode:** `1` means apply depthwise convolution in the encoder only.  
+- **dconv_comp:** Compression factor in the DConv branch.  
+- **dconv_init:** A scaling factor for initialization.
+
+```yaml
+  # Transformer settings
+  bottom_channels: 0
+  t_layers: 5
+  t_hidden_scale: 4.0
+  t_heads: 8
+  t_dropout: 0.0
+  t_layer_scale: true
+  t_gelu: true
+```
+- **t_layers:** Number of transformer layers.  
+- **t_heads:** Number of self-attention heads.  
+- **t_gelu:** Whether to use GELU activation in the transformer blocks.
+
+```yaml
+  # Positional embedding settings
+  t_emb: "sin"
+  t_max_positions: 10000
+  t_max_period: 10000.0
+  t_weight_pos_embed: 1.0
+  t_cape_mean_normalize: true
+  t_cape_augment: true
+  t_cape_glob_loc_scale: [5000.0, 1.0, 1.4]
+  t_sin_random_shift: 0
+```
+- **t_emb:** Type of positional embedding; `"sin"` is a sinusoidal positional embedding.  
+- **t_cape_mean_normalize:** Whether to normalize CAPE embeddings if used.
+
+```yaml
+  # Transformer normalization settings
+  t_norm_in: true
+  t_norm_in_group: false
+  t_group_norm: false
+  t_norm_first: true
+  t_norm_out: true
+  t_weight_decay: 0.0
+  t_lr: null
+```
+- **t_norm_in:** Normalizes features before the attention blocks.  
+- **t_lr:** Optionally specify a custom learning rate for only the transformer.
+
+```yaml
+  # Sparsity settings for transformer attention
+  t_sparse_self_attn: false
+  t_sparse_cross_attn: false
+  t_mask_type: "diag"
+  t_mask_random_seed: 42
+  t_sparse_attn_window: 500
+  t_global_window: 100
+  t_sparsity: 0.95
+  t_auto_sparsity: false
+  t_cross_first: false
+```
+- **t_sparse_self_attn:** If `true`, uses local-sparse patterns for self attention (not used here).  
+- **t_mask_type:** `"diag"` means we mask out attention outside a diagonal band.
+
+```yaml
+  # LoRA specific settings
+  lora_rank: 8
+  lora_alpha: 1.0
+  lora_dropout: 0.1
+```
+- **lora_rank:** Base rank for LoRA. Higher rank = more capacity.  
+- **lora_alpha:** Scales LoRA updates.  
+- **lora_dropout:** Dropout used specifically within LoRA modules.
+
+```yaml
+  # Source linkage settings:
+  source_linkage:
+    other: other
+    drums: kick
+    vocals: vocals
+    bass: bass
+    hihat: new
+```
+- **source_linkage:** Tells the model how to map old sources to new ones if you’re continuing from a model with fewer (or different) sources.  
+- Marking `"hihat"` as `"new"` indicates it has no corresponding pretrained weights.
+
+```yaml
+  layer_ranks:
+    "encoder.0.*": 16
+    "encoder.1.*": 12
+    "transformer.*": 12
+    "decoder.0.*": 12
+    "decoder.1.*": 8
+    "decoder.2.*": 6
+  lora_rank_mode: "heuristic"
+```
+- **layer_ranks:** Overrides rank for certain layers (like the first encoder).  
+- **lora_rank_mode:** `"heuristic"` uses a strategy where “important” layers get higher ranks.
+
+```yaml
+  # Memory optimization
+  enable_checkpointing: true
+  enable_profiling: false
+
+  # Weight initialization
+  rescale: 0.1
+```
+- **enable_checkpointing:** Uses gradient checkpointing to reduce memory usage.  
+- **rescale:** A factor to rescale weights after initialization to keep them stable.
+
+#### 5. Additional Training Settings
+
+```yaml
+training:
+  batch_size: 1
+  gradient_clip: 0.5
+  mixed_precision: true
+  epochs: 360
+  optim:
+    lr: 5e-5
+    warmup_steps: 1000
+    scheduler: cosine
+```
+- **training:** You can override certain parameters here—like `batch_size`—without editing them inside the main `htdemucs` block.
+
+```yaml
+# SVD settings for LoRA
+svd:
+  penalty: 0
+  ...
+```
+- These advanced settings handle certain aspects of low-rank factorization or SVD if needed.
+
+```yaml
+# Quantization settings
+quant:
+  diffq: null
+  ...
+```
+- Typically not used during training, but provided if you wish to experiment with quantization.
+
+```yaml
+# Output and logging
+dora:
+  dir: outputs
+  exclude: ["misc.*", "slurm.*", "test.reval", "flag", "dset.backend"]
+```
+- **dir:** Where all logs, checkpoints, and generated audio examples are saved.
+
+```yaml
+# SLURM cluster usage (optional)
+slurm:
+  time: 4320
+  constraint: volta32gb
+  setup: ['module load ...']
+```
+- If training on a SLURM-based cluster, you can specify job constraints here.
+
+```yaml
+# Logging config
+hydra:
+  job_logging:
+    formatters:
+      colorlog:
+        datefmt: "%m-%d %H:%M:%S"
+```
+- Adjust the date/time format for logs if needed.
+
+---
+
+## Handling Source Count Mismatch and Source Linkage
+
+**Why do we need source linkage?** Sometimes you have a pretrained model with a certain set of sources, e.g., `["drums", "bass", "vocals", "other"]`, but now want to fine-tune it on a dataset that has either more or fewer sources. The **source_linkage** block tells the training code how to remap pretrained weights to your new stems.
+
+- **Mark “new” sources** (like `"hihat"`) so the code knows to initialize them from scratch.
+- For example, if your pretrained model had `"drums"` but your new dataset has both `"kick"` and `"hihat"`, you might map `"drums" → "kick"` and set `"hihat" : "new"`.
+
+**Steps to ensure correct setup:**
+1. **Update** `dset.sources` in your config to reflect the new stems.  
+2. **Define** a `source_linkage` mapping in `htdemucs` that remaps old pretrained stems to the new ones.  
+3. **Verify** that the final number of stems in your new model and dataset line up.
+
+---
+
+## Training Process
+
+### Monitoring and Logging
+
+Demucs logs are stored in the **`outputs/<signature>`** folder. Key logs include:
+- **train.log:** Real-time updates on loss and iteration count.
+- **validation/ folder:** Validation SDR results (if computed).
+- **checkpoints/ folder:** Periodic model checkpoints.
+
+**Example tips:**
+1. **View live logs** in your terminal:
+   ```bash
+   tail -f outputs/<experiment_signature>/logs/train.log
+   ```
+2. **Check GPU usage**:
+   ```bash
+   nvidia-smi -l 1
+   ```
+3. **Launch TensorBoard** to visualize metrics:
+   ```bash
+   tensorboard --logdir outputs/<experiment_signature>/tensorboard
+   ```
+
+4. **Key Metrics and their Location:**
+    THe loss curves is a good indicator of training progress. You can find them in the `outputs/<signature>/tensorboard/` folder.
+    Model checkpoints are the saved weights of the model at different training stages. They are stored in the `outputs/<signature>/checkpoints/` folder.
+    Validation results are the SDR metrics computed on the validation set. They are stored in the `outputs/<signature>/validation/` folder.
+    Configuration files are stored in the `outputs/<signature>/config.yaml` file.
+
+
+### Starting from Scratch
+
+To create a brand new model with LoRA:
 
 ```bash
-# Start from pre-trained 4-source model and adapt to 5 sources with specialized drum separation
+dora run -d model=htdemucs \
+  htdemucs.lora_rank=4 \
+  htdemucs.lora_alpha=1.0 \
+  htdemucs.channels=48
+```
+
+**Explanation:**  
+- **`model=htdemucs`**: We choose the HTDemucs base architecture.  
+- **`lora_rank=4`**: A modest rank that saves memory while still enabling adaptation.  
+- **`channels=48`**: The base number of channels in the network.
+
+### Fine-tuning Existing Models
+
+1. **Fine-tuning a 4‑source model** (e.g., `htdemucs`):
+   ```bash
+   dora run -d -f 955717e8 \
+     continue_from=955717e8 \
+     htdemucs.lora_rank=4 \
+     variant=finetune
+   ```
+   - **`-f 955717e8`** references the experiment signature you want to start from.
+   - **`variant=finetune`** is just a name for your experiment run.
+
+2. **Fine-tuning a 6‑source model** (e.g., `htdemucs_6s`):
+   ```bash
+   dora run -d -f htdemucs_6s \
+     continue_from=htdemucs_6s \
+     htdemucs.lora_rank=8 \
+     variant=finetune
+   ```
+   - Similar approach, but now we specify `lora_rank=8` for deeper adaptation.
+
+### Training Command for 5‑Source Model
+
+Below is a **human-readable explanation** for an example command:
+
+```bash
 dora run -d -f htdemucs \
   continue_from=htdemucs \
   htdemucs.lora_rank=8 \
@@ -136,368 +515,58 @@ dora run -d -f htdemucs \
   htdemucs.segment=12
 ```
 
-### Dataset Requirements and Recommendations
+1. **`-d`**: Runs in detached mode, enabling parallel logging.  
+2. **`-f htdemucs`**: Base experiment name, meaning we start from a reference named `"htdemucs"`.  
+3. **`continue_from=htdemucs`**: Tells the script to load from a pretrained “htdemucs” checkpoint.  
+4. **`htdemucs.lora_rank=8`**: We are using a rank of 8 for LoRA, giving more capacity than rank=4.  
+5. **`variant=finetune`**: Labels this training session as a fine-tuning variant in the logs.  
+6. **`dset.sources='["other", "kick", "vocal", "bass", "hihat"]'`**: The new dataset has these 5 sources.  
+7. **`dset.wav="path/to/5stem_dataset"`**: Points to your custom 5-stem dataset.  
+8. **`optim.lr=5e-5`**: Low learning rate, typical for fine-tuning.  
+9. **`optim.warmup_steps=500`**: We warm up the learning rate over 500 steps.  
+10. **`htdemucs.nfft=4096`**: Use a 4096 FFT size for better frequency resolution.  
+11. **`htdemucs.segment=12`**: Segment length is 12 seconds, giving the model a good chunk of audio to learn from.
 
-1. **Dataset Size Recommendations**
-   - Minimum Requirements:
-     * Training set: 20-30 songs (2-3 hours of music)
-     * Validation set: 5-10 songs (30-60 minutes)
-   - Optimal Setup:
-     * Training set: 50-100 songs (5-10 hours)
-     * Validation set: 15-20 songs (1.5-2 hours)
-   - Professional Setup:
-     * Training set: 200+ songs (20+ hours)
-     * Validation set: 40-50 songs (4-5 hours)
-
-2. **Audio Quality Requirements**
-   - Sample rate: 44.1kHz or 48kHz
-   - Bit depth: 16-bit or 24-bit
-   - Format: WAV (uncompressed)
-   - Duration: Full tracks (3-7 minutes each)
-
-### Dataset Preparation
-
-1. **Organize Your Training Data**
-   ```
-   dataset/
-   ├── train/                      # Training dataset directory
-   │   ├── track1/                 # Each track in its own folder
-   │   │   ├── mixture.wav        # Original mixed track
-   │   │   ├── other.wav         # All instruments except drums/bass
-   │   │   ├── kick.wav          # All drums except hi-hats
-   │   │   ├── vocals.wav         # All vocal elements
-   │   │   ├── bass.wav          # Bass instruments
-   │   │   └── hihat.wav         # Hi-hat patterns only
-   │   ├── track2/
-   │   │   ├── mixture.wav
-   │   │   └── ...
-   │   └── ...
-   └── valid/                      # Validation dataset directory
-       ├── track1/                 # Same structure as training
-       │   ├── mixture.wav
-       │   └── ...
-       └── ...
-   ```
-
-2. **Audio File Requirements**
-   - Each stem must be perfectly aligned
-   - Sum of stems should equal the mixture
-   - No clipping or distortion
-   - Consistent loudness levels
-
-3. **Stem Quality Guidelines**
-   - Other:
-     * Clean separation from drums and bass
-     * Well-preserved melodic content
-     * Minimal rhythmic bleed-through
-   - Kick:
-     * All drum elements except hi-hats
-     * Clean transients for all percussion
-     * No hi-hat bleed in drum hits
-   - Vocal:
-     * Clear separation from instruments
-     * All vocal processing included
-     * No instrumental bleed
-   - Bass:
-     * Clear sub frequencies
-     * Minimal mid-range bleed
-     * Consistent phase alignment
-   - Hi-hat:
-     * Isolated hi-hat patterns only
-     * Clean cymbal separation
-     * No bleed from other drums
-
-4. **Special Considerations for Drum Component Separation**
-   - Ensure complete isolation of hi-hats from other drums
-   - Maintain phase coherence between kick and hi-hat stems
-   - Verify no hi-hat artifacts in kick stem
-   - Check for proper transient preservation in both stems
-   - Monitor frequency crossover points between components
-
-### Configuration Setup
-
-1. **Update Dataset Path**
-   ```yaml
-   # conf/config.yaml
-   dset:
-     wav: "path/to/tech_house_data"  # Absolute path to dataset
-     sources: ["drums", "bass", "other", "vocals"]  # Source order
-     sample_rate: 44100  # Match your audio files
-     channels: 2  # Stereo processing
-   ```
-
-2. **Verify Dataset Loading**
-   ```bash
-   # Test dataset loading
-   python -m tools.verify_dataset path/to/tech_house_data
-   ```
-
-### Dataset Metadata Cache
-
-Datasets are scanned on first use. To force rescan:
-```bash
-rm -rf metadata/
-
-## LoRA Configuration
-
-### Basic Parameters
-
-```yaml
-htdemucs:
-  # Core LoRA settings
-  lora_rank: 4              # Default rank for adaptation matrices
-  lora_alpha: 1.0           # Scaling factor for updates
-  lora_dropout: 0.1         # Dropout for regularization
-  lora_rank_mode: heuristic # Rank allocation strategy
-  
-  # Advanced settings
-  layer_ranks:              # Custom ranks per layer
-    "encoder.0.*": 16      # Higher rank for early layers
-    "transformer.*": 12    # Medium rank for transformer
-    "decoder.*": 4        # Lower rank for decoder
-  lora_max_rank: 16        # Maximum allowed rank
-```
-
-### Rank Allocation Modes
-
-1. Uniform Mode:
-   - Consistent rank across all layers
-   - Good baseline for initial experiments
-   ```yaml
-   htdemucs.lora_rank_mode: uniform
-   htdemucs.lora_rank: 4
-   ```
-
-2. Heuristic Mode (Recommended):
-   - Layer-specific ranks based on importance
-   - Critical layers (encoder.0, transformer): 8-16
-   - Middle layers: 4-8
-   - Final layers: 2-4
-   ```yaml
-   htdemucs.lora_rank_mode: heuristic
-   htdemucs.lora_rank: 4  # Base rank for scaling
-   ```
-
-3. Gradient Mode:
-   - Dynamic rank adaptation (experimental)
-   ```yaml
-   htdemucs.lora_rank_mode: gradient
-   htdemucs.min_rank: 2
-   htdemucs.max_rank: 16
-   ```
-
-### Tech-House Specific Fine-tuning
-
-1. **Start from Pre-trained Model**
-   ```bash
-   # Fine-tune HTDemucs for Tech-House
-   dora run -d -f htdemucs \
-     continue_from=htdemucs \
-     htdemucs.lora_rank=8 \
-     variant=finetune \
-     dset.wav="path/to/tech_house_data" \
-     optim.lr=1e-4 \
-     optim.warmup_steps=1000
-   ```
-
-2. **Genre-Optimized Configuration**
-   ```yaml
-   htdemucs:
-     # Audio Processing
-     nfft: 4096                # Larger FFT for better bass resolution
-     segment: 15               # Longer segments for pattern recognition
-     hop_length: 1024         # Overlap for smoother transitions
-     
-     # LoRA settings
-     lora_rank: 8             # Higher rank for genre-specific features
-     lora_alpha: 0.8          # Balanced adaptation strength
-     lora_dropout: 0.1        # Regularization for stability
-     
-     # Layer-specific ranks
-     layer_ranks:
-       "encoder.0.*": 16      # High rank for initial feature extraction
-       "encoder.1.*": 12      # Focus on rhythm patterns
-       "transformer.*": 12    # Attention to long-term structure
-       "decoder.*": 8        # Preserve genre-specific details
-     
-     # Training settings
-     batch_size: 32          # Adjust based on GPU memory
-     gradient_clip: 0.5      # Prevent gradient explosions
-     mixed_precision: true   # Improve training speed
-   ```
-
-## Training Process
-
-### Monitoring and Logging
-
-1. **Access Training Logs**
-   ```bash
-   # View live training progress
-   tail -f outputs/<experiment_signature>/logs/train.log
-   
-   # Monitor GPU usage
-   nvidia-smi -l 1
-   
-   # View TensorBoard metrics
-   tensorboard --logdir outputs/<experiment_signature>/tensorboard
-   ```
-
-2. **Important Metrics Location**
-   - Loss curves: `outputs/<signature>/tensorboard/`
-   - Model checkpoints: `outputs/<signature>/checkpoints/`
-   - Validation results: `outputs/<signature>/validation/`
-   - Configuration: `outputs/<signature>/config.yaml`
-
-3. **Key Metrics to Monitor**
-   - Training loss: Should decrease steadily
-   - Validation SDR: Should improve over time
-     * Good: > 5 dB
-     * Great: > 7 dB
-     * Excellent: > 10 dB
-   - Per-source metrics:
-     * Drums: Focus on transient clarity
-     * Bass: Monitor low-end separation
-     * Other: Check effect preservation
-     * Vocals: Verify clean isolation
-
-4. **Automatic Checkpointing**
-   - Best model saved at: `outputs/<signature>/checkpoints/best.th`
-   - Regular checkpoints: `outputs/<signature>/checkpoints/checkpoint_*.th`
-   - LoRA weights: `outputs/<signature>/checkpoints/lora_*.th`
-
-### Starting from Scratch
-
-Train a new model with LoRA:
-
-```bash
-dora run -d model=htdemucs \
-  htdemucs.lora_rank=4 \
-  htdemucs.lora_alpha=1.0 \
-  htdemucs.channels=48
-```
-
-### Fine-tuning Existing Models
-
-1. Fine-tune 4-stem model (htdemucs):
-```bash
-dora run -d -f 955717e8 continue_from=955717e8 \
-  htdemucs.lora_rank=4 \
-  variant=finetune
-```
-
-2. Fine-tune 6-stem model (htdemucs_6s):
-```bash
-dora run -d -f htdemucs_6s continue_from=htdemucs_6s \
-  htdemucs.lora_rank=8 \
-  variant=finetune
-```
-
-### Training Configuration
-
-Key parameters in `conf/config.yaml`:
-```yaml
-# Model architecture
-htdemucs:
-  channels: 48            # Initial number of channels
-  growth: 2              # Channel growth per layer
-  depth: 4              # Number of encoder/decoder layers
-  
-  # Transformer settings
-  t_layers: 5           # Transformer layers
-  t_heads: 8           # Attention heads
-  t_dropout: 0.0       # Transformer dropout
-  
-  # LoRA settings
-  lora_rank: 4         # Default adaptation rank
-  lora_alpha: 1.0      # Update scaling
-  lora_dropout: 0.1    # LoRA-specific dropout
-  
-  # Memory optimization
-  enable_checkpointing: true  # For large models
-  enable_profiling: false    # Memory tracking
-```
+---
 
 ## Model Architecture
 
-HTDemucs combines:
-1. Dual-Path Processing:
-   - Frequency domain (STFT spectrograms)
-   - Time domain (raw waveforms)
-   
-2. Transformer Integration:
-   - Cross-attention between domains
-   - Position-aware processing
-   
-3. LoRA Adaptation:
-   - All convolutional layers
-   - Transformer attention layers
-   - Skip connections
+## Model Architecture
 
-### Monitoring Training
+HTDemucs combines multiple processing methods to capture diverse musical features:
 
-Monitor training progress through logs and metrics:
+1. **Dual-Path Processing**  
+  - **Frequency Domain (STFT-based):** Analyzes harmonic and tonal components by converting waveforms into a frequency representation.  
+  - **Time Domain (Raw Waveforms):** Detects transients, rhythms, and other time-specific details directly from raw audio.  
+  - **Fusion:** Both paths are blended at crucial network stages, so the model benefits from frequency clarity and time-domain precision.
 
-```python
-from demucs.train import main as train_main
+2. **Transformer Integration**  
+  - **Cross-Attention:** The model’s time and frequency branches can exchange information, enhancing separation of intricate elements like vocals or percussion.  
+  - **Positional Embeddings:** These help align audio features over time, ensuring the model tracks temporal context.  
+  - **Sparse Attention (Optional):** Cuts down computations for long audio signals by limiting attention computations to relevant regions.
 
-# Custom training monitoring
-metrics = {
-    'train_loss': [],
-    'valid_loss': [],
-    'nsdr': []
-}
-
-# Training with metric collection
-train_main(args, metrics_callback=lambda m: metrics[m.name].append(m.value))
-```
+3. **LoRA Adaptation**  
+  - **Lightweight Fine-Tuning:** Only small, low-rank layers are trained, while the main model stays frozen to preserve its general knowledge.  
+  - **Speed and Efficiency:** LoRA drastically reduces the number of trainable parameters, making adaptation to new music genres or instrument tracks faster.  
+  - **Domain Specialization:** Perfect for tasks like adding niche stems (e.g., new instruments) or retraining in a custom audio domain.
 
 
 ## Best Practices
 
 ### Rank Selection
 
-Choose ranks based on model size:
-- Small models (channels ≤ 48): rank 2-4
-- Medium models (64-128): rank 4-8
-- Large models (≥ 256): rank 8-16
-### Learning Rate Guidelines
+Your LoRA rank can significantly affect memory usage and training quality. Some guidelines:
 
-```python
-# Recommended learning rate ranges for different scenarios
-lr_configs = {
-    'from_scratch': {
-        'initial_lr': 1e-4,
-        'warmup_steps': 1000,
-        'schedule': 'cosine'
-    },
-    'fine_tuning': {
-        'initial_lr': 5e-5,
-        'warmup_steps': 500,
-        'schedule': 'linear'
-    }
-}
-```
-
-### Memory Optimization
-
-1. Enable gradient checkpointing:
-```yaml
-htdemucs.enable_checkpointing: true
-```
-
-2. Use mixed precision:
-```yaml
-htdemucs.mixed_precision: true
-```
-
-3. Adjust batch size based on GPU memory:
-```yaml
-batch_size: 32  # Reduce if OOM errors occur
-```
+- **Small models** (≤48 channels): Ranks of 2–4 often suffice.  
+- **Medium models** (64–128 channels): Ranks of 4–8.  
+- **Large models** (≥256 channels): Ranks of 8–16.  
 
 ### Learning Rate Guidelines
 
+You typically want a smaller learning rate when fine-tuning versus training from scratch:
+
 ```yaml
+# Example: two scenarios
 optim:
   # From scratch
   lr: 1e-4
@@ -510,9 +579,36 @@ optim:
   scheduler: linear
 ```
 
+**Explanation:**  
+- **From scratch:** A higher LR (like 1e-4) can help the model learn more quickly since it starts from zero.  
+- **Fine-tuning:** A lower LR (like 5e-5) is better to avoid overwriting the pretrained knowledge too aggressively.  
+- **Warmup:** Gradually increases LR from 0 to the target over a certain number of steps. This helps stable convergence.  
+- **Scheduler:** “Cosine” or “linear” annealing shapes how LR decreases over epochs.
+
+### Memory Optimization
+
+1. **Gradient Checkpointing:**
+   ```yaml
+   htdemucs.enable_checkpointing: true
+   ```
+   Helps reduce VRAM usage at the cost of extra compute.
+
+2. **Mixed Precision:**
+   ```yaml
+   htdemucs.mixed_precision: true
+   ```
+   Speeds up training and reduces memory usage by using half-precision floats.
+
+3. **Batch Size:**
+   If you encounter OOM (Out Of Memory) errors, try reducing your batch size from 16 to 8 or even 1.
+
+---
+
 ## Model Export and Evaluation
 
 ### Exporting Models
+
+When your training finishes, you can export the resulting model:
 
 ```bash
 # Export single model
@@ -521,6 +617,7 @@ python3 -m tools.export <signature>
 # Export with LoRA weights
 python3 -m tools.export <signature> --include-lora
 ```
+- **`<signature>`**: The ID or name referencing your experiment run.
 
 ### Model Evaluation
 
@@ -528,197 +625,181 @@ python3 -m tools.export <signature> --include-lora
 # Evaluate on test set
 python3 -m tools.test_pretrained -n <signature>
 
-# Custom evaluation
+# For a custom evaluation with multiple overlap shifts
 python3 -m tools.test_pretrained -n <signature> test.shifts=2
 ```
+- The script automatically loads the best checkpoint from your specified signature and evaluates it on your test data.
 
 ### Using Trained Models
+
+You can load your trained (and possibly LoRA-fine-tuned) model in Python:
 
 ```python
 from demucs import pretrained
 from demucs.apply import apply_model
 
 # Load model with LoRA
-model = pretrained.get_model('your_signature')
-model.load_lora_weights('path/to/weights.pth')
-
-# Process audio
-sources = apply_model(model, mix)
-```
-
-## Advanced Configuration
-
-### Layer-Specific Settings
-
-Fine-grained control over LoRA adaptation:
-
-```yaml
-htdemucs:
-  layer_ranks:
-    # Encoder layers
-    "encoder.0.*": 16    # First encoder (critical)
-    "encoder.1.*": 12    # Second encoder
-    
-    # Transformer layers
-    "transformer.self_attn.*": 8
-    "transformer.cross_attn.*": 12
-    
-    # Decoder layers
-    "decoder.0.*": 8     # First decoder
-    "decoder.1.*": 6     # Second decoder
-    "decoder.2.*": 4     # Final decoder
-```
-
-### Memory Profiling
-
-Enable detailed memory tracking:
-
-```yaml
-htdemucs:
-  enable_profiling: true
-  profile_memory: true
-```
-
-### Custom Training Segments
-
-Adjust training segment length:
-
-```yaml
-# In config.yaml
-segment: 10  # Training segment length in seconds
-use_train_segment: true  # Use fixed length for inference
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. Out of Memory (OOM):
-```yaml
-# Solutions
-htdemucs.enable_checkpointing: true
-batch_size: batch_size // 2
-htdemucs.mixed_precision: true
-```
-
-2. Slow Convergence:
-```yaml
-# Adjust learning rate and warmup
-optim.lr: 2e-4
-optim.warmup_steps: 2000
-```
-
-3. Training Instability:
-```yaml
-# Stabilize training
-htdemucs.lora_alpha: min(lora_alpha, dim // n_heads)
-htdemucs.gradient_clip: 1.0
-```
-
-### Validation
-
-Monitor training progress:
-- Loss curves should decrease steadily
-- SDR metrics improve over time
-- Memory usage remains stable
-
-## Troubleshooting
-
-Common issues and solutions:
-
-1. Out of Memory (OOM):
-```python
-# Reduce memory usage
-htdemucs.enable_checkpointing = True
-htdemucs.batch_size = htdemucs.batch_size // 2
-```
-
-2. Slow Convergence:
-```python
-# Adjust learning rate and warmup
-optim.lr = 2e-4
-optim.warmup_steps = 2000
-```
-
-3. Unstable Training:
-```python
-# Stabilize training
-htdemucs.lora_alpha = min(htdemucs.lora_alpha, htdemucs.dim // htdemucs.n_heads)
-htdemucs.gradient_clip = 1.0
-```
-
-## Performance Optimization
-
-### Mixed Precision Training
-
-Enable mixed precision for faster training:
-
-```python
-# In your training configuration
-htdemucs.mixed_precision = True
-htdemucs.precision = 'float16'
-```
-
-### Efficient Data Loading
-
-Optimize data loading:
-
-```python
-# In your configuration
-dset:
-  num_workers: 4
-  prefetch_factor: 2
-  pin_memory: True
-```
-
-## Model Export and Deployment
-
-### Exporting Trained Models
-
-Export your trained LoRA model:
-
-```bash
-python -m tools.export <signature> --include-lora
-```
-
-### Using Trained Models
-
-Load and use your trained model:
-
-```python
-from demucs import pretrained
-from demucs.apply import apply_model
-
-# Load model with LoRA weights
 model = pretrained.get_model('your_model_signature')
 model.load_lora_weights('path/to/lora_weights.pth')
 
-# Process audio
+# Process an audio mixture
 sources = apply_model(model, mix)
 ```
+- **`apply_model`** uses Demucs to separate the mixture into stems.  
 
 ### Quantization for Deployment
 
-Quantize model for efficient deployment:
-
+For efficient real-time usage:
 ```python
-# 8-bit quantization
 model.quantize(bits=8, optimize_scales=True)
-
-# Export quantized model
 torch.save({
     'state_dict': model.state_dict(),
     'lora_state': model.get_lora_state(),
     'config': model.config
 }, 'quantized_model.pth')
 ```
+- Reduces the model size at the cost of some fidelity.
+
+---
+
+## Advanced Configuration
+
+### Layer-Specific Settings
+
+LoRA parameters can be specialized on a per-layer basis:
+
+```yaml
+htdemucs:
+  layer_ranks:
+    "encoder.0.*": 16    # early layers with more capacity
+    "encoder.1.*": 12
+    "transformer.*": 12
+    "decoder.0.*": 12
+    "decoder.1.*": 8
+    "decoder.2.*": 6
+```
+- This approach invests “rank budget” where it’s most beneficial.
+
+### Memory Profiling
+
+To track memory usage:
+
+```yaml
+htdemucs:
+  enable_profiling: true
+```
+
+### Custom Training Segments
+
+```yaml
+segment: 10
+use_train_segment: true
+```
+- Forces consistent segment length (e.g., 10 s) in both training and inference, which can help reduce variability.
+
+### Dynamic Source Count Handling
+
+If your new dataset has a different number of sources than the pretrained model, ensure:
+1. **`dset.sources`** is updated.  
+2. **`source_linkage`** is defined to indicate how old sources are remapped.  
+3. Newly introduced stems are marked as `new`.
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Out of Memory (OOM):**
+   ```yaml
+   htdemucs.enable_checkpointing: true
+   batch_size: <reduced_batch_size>
+   htdemucs.mixed_precision: true
+   ```
+   Either reduce the batch size or enable checkpointing/mixed precision.
+
+2. **Slow Convergence:**
+   ```yaml
+   optim.lr: 2e-4
+   optim.warmup_steps: 2000
+   ```
+   Increase LR slightly and warm up for more steps if the loss is stagnating.
+
+3. **Training Instability:**
+   ```yaml
+   htdemucs.lora_alpha: 1.0
+   optim.clip_grad: 1.0
+   ```
+   Clipping gradients or lowering LoRA alpha can stabilize training.
+
+### Validation
+
+Watch the **loss curves** and **SDR metrics**:
+- **Loss** should steadily decrease.  
+- **SDR** (Signal-to-Distortion Ratio) should improve over time. Aim for an SDR above 5–7 dB to see decent separation.
+
+---
+
+## Performance Optimization
+
+### Mixed Precision Training
+
+```yaml
+htdemucs.mixed_precision: true
+```
+Saves GPU memory and speeds up training by using half precision.
+
+### Efficient Data Loading
+
+```yaml
+dset:
+  num_workers: 4
+  prefetch_factor: 2
+  pin_memory: true
+```
+Speeds up data loading by buffering additional batches.
+
+---
+
+## Model Export and Deployment
+
+### Exporting Trained Models
+
+```bash
+python -m tools.export <signature> --include-lora
+```
+This bundles the entire model, including LoRA layers, into a single checkpoint.
+
+### Using Trained Models
+
+```python
+from demucs import pretrained
+from demucs.apply import apply_model
+
+model = pretrained.get_model('your_model_signature')
+model.load_lora_weights('path/to/lora_weights.pth')
+sources = apply_model(model, mix)
+```
+
+### Quantization for Deployment
+
+```python
+model.quantize(bits=8, optimize_scales=True)
+torch.save({
+    'state_dict': model.state_dict(),
+    'lora_state': model.get_lora_state(),
+    'config': model.config
+}, 'quantized_model.pth')
+```
+Useful for on-device or real-time separation with minimal overhead.
+
+---
 
 ## Advanced Topics
 
 ### Custom LoRA Architectures
 
-Implement custom LoRA configurations:
-
+If you want to customize how ranks scale with depth or implement novel LoRA strategies:
 ```python
 class CustomLoRAConfig:
     def __init__(self, base_rank=4, rank_growth=1.5):
@@ -729,14 +810,64 @@ class CustomLoRAConfig:
         return int(self.base_rank * (self.rank_growth ** layer_depth))
 ```
 
-### Gradient-Based Rank Adaptation
+### Heuristic and Gradient-Based Rank Adaptation
 
-Enable dynamic rank adaptation:
+Below is an explanation of the two modes along with a recommendation:
 
-```python
-htdemucs.lora_rank_mode = 'gradient'
-htdemucs.lora_rank_adaptation = True
-htdemucs.min_rank = 2
-htdemucs.max_rank = 16
+**Heuristic Mode:**  
+A simple, rule-based approach to assigning ranks to each layer:
+```yaml
+htdemucs.lora_rank_mode: heuristic
+htdemucs.lora_rank_adaptation: false
 ```
 
+- **What It Does:**  
+  In heuristic mode, the LoRA rank for each layer is determined by a predefined rule based on the layer’s role or position in the network (for example, using higher ranks for critical layers like early encoders or transformer layers, and lower ranks for later refinement layers).  
+- **How It Works:**  
+  The configuration uses a fixed, rule‐based mapping (for example, doubling the default rank in the first encoder layer or using specific values for decoder layers) as specified in the configuration (here, `"lora_rank_mode": "heuristic"`).  
+- **Pros:**  
+  - Simple and predictable.  
+  - Requires no additional computational overhead or hyperparameter tuning during training.  
+  - Works well in many practical fine-tuning scenarios.
+
+
+**Gradient Mode:**  
+An experimental mode that adjusts ranks dynamically based on gradient signals:
+```yaml
+htdemucs.lora_rank_mode: gradient
+htdemucs.lora_rank_adaptation: true
+htdemucs.min_rank: 2
+htdemucs.max_rank: 16
+```
+
+- **What It Does:**  
+  In gradient mode, the model dynamically adjusts the LoRA ranks during training based on gradient signals. The idea is to allocate more capacity (i.e. higher rank) to layers that are more “sensitive” (have larger or more significant gradients) and less capacity to others.  
+- **How It Works:**  
+  When activated (e.g. by setting `"lora_rank_mode": "gradient"` and enabling `"lora_rank_adaptation": true` along with specifying `"min_rank"` and `"max_rank"`), the system monitors gradient magnitudes during training and adapts the effective rank of the low-rank updates accordingly.
+- **Pros:**  
+  - Provides a form of adaptive capacity that can potentially yield better fine-tuning performance by tailoring adaptation to each layer’s needs.
+  - May be beneficial when the optimal rank varies across layers or when there is uncertainty about what fixed ranks to choose.
+
+- **Cons:**  
+  - It is experimental and may require careful tuning of the additional hyperparameters (such as minimum and maximum ranks).
+  - Introduces some extra computational overhead and complexity in the training loop.
+  - May be less stable than the fixed heuristic approach in certain scenarios.
+
+**Which One to Use?**
+
+For most fine-tuning scenarios—especially when you are adapting a pretrained model (in your case, transitioning from a 4-source to a 5-source configuration) with a relatively small dataset—the **heuristic mode** is generally recommended. It is more straightforward and has been shown to work well without the added complexity of dynamically adapting ranks. 
+
+The gradient mode is experimental and might provide improvements in some cases but also introduces extra complexity and potential instability. If you are new to fine-tuning or if your primary goal is to reliably adapt a pretrained model with minimal fuss, sticking with the **heuristic** approach (as specified by `"lora_rank_mode": "heuristic"`) is advisable.
+
+
+---
+
+## Final Remarks
+
+We hope this documentation helps you fine-tune HT-Demucs with LoRA for new music genres or source sets. Pay special attention to:
+
+- **LoRA rank** and **learning rate** adjustments if your domain differs from the original pretrained model.
+- The **Handling Source Count Mismatch** section if you have a different number of stems than the pretrained model expects.
+- **Memory optimization** (checkpointing, mixed precision) if you run out of GPU memory.
+
+Happy training!

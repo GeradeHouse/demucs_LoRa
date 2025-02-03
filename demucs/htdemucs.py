@@ -202,9 +202,10 @@ class LoRALayerBase(nn.Module):
             raise ValueError(f"LoRA rank must be ≥1, got {self.rank}")
         # Check rank doesn't exceed matrix dimensions to avoid zero-sized tensors
         if self.rank > min(fan_in, fan_out):
-            new_rank = min(fan_in, fan_out)
-            print(f"Warning: LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})={new_rank}. Clamping to {new_rank}.")
-            self.rank = new_rank
+            raise ValueError(
+                f"LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})="
+                f"{min(fan_in, fan_out)}. This would create zero-dimension matrices."
+            )
         # Validate alpha is non-negative and properly scaled for stable updates
         if self.alpha < 0:
             raise ValueError(f"LoRA alpha must be ≥0, got {self.alpha}")
@@ -907,11 +908,11 @@ class HTDemucs(nn.Module):
                 various shape parameters and will not work out of the box for hybrid models.
             wiener_iters: when using Wiener filtering, number of iterations at test time.
             end_iters: same but at train time. For a hybrid model, must be equal to `wiener_iters`.
-            wiener_residual: add residual source before wiener filtering.
+            wiener_residual: add residual source before Wiener filtering.
             cac: uses complex as channels, i.e. complex numbers are 2 channels each
                 in input and output. no further processing is done before ISTFT.
             depth (int): number of layers in the encoder and in the decoder.
-            rewrite (bool): add 1x1 convolution to each layer.
+            rewrite (bool): add 1x1 conv to each layer.
             multi_freqs: list of frequency ratios for splitting frequency bands with `MultiWrap`.
             multi_freqs_depth: how many layers to wrap with `MultiWrap`. Only the outermost
                 layers will be wrapped.
@@ -1867,7 +1868,7 @@ class HEncLayer(nn.Module):
             if self.freq:  # Reshape for frequency processing
                 B, C, Fr, T = y.shape  # [batch, channels, freq, time]
                 y = y.permute(0, 2, 1, 3).reshape(-1, C, T)  # Prepare for DConv
-            y = self.dconv(y)  # Apply depthwise-separable convolution
+            y = self.dconv(y)  # Apply depth-wise convolution
             if self.freq:  # Restore original shape
                 y = y.view(B, Fr, C, T).permute(0, 2, 1, 3)
         

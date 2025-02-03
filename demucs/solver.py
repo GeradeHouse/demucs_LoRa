@@ -108,7 +108,7 @@ class Solver(object):
             self.model.load_state_dict(package['state'])
             self.optimizer.load_state_dict(package['optimizer'])
             self.history[:] = package['history']
-            self.best_state = package.get('best_state', package['state'])
+            self.best_state = package['best_state']
             for kind, emas in self.emas.items():
                 for k, ema in enumerate(emas):
                     ema.load_state_dict(package[f'ema_{kind}_{k}'])
@@ -123,14 +123,47 @@ class Solver(object):
             cf = root / str(self.args.continue_from) / name
             logger.info("Loading from %s", cf)
             package = torch.load(cf, 'cpu')
-            state = package.get('state', package)
-            self.best_state = package.get('best_state', state)
+            # Remap output layer weights for source linkage if necessary
+            if hasattr(self.args.htdemucs, "source_linkage"):
+                new_sources = self.args.dset.sources
+                old_sources = ["other", "drums", "vocals", "bass"]
+                linkage = self.args.htdemucs.source_linkage
+                # Build inverse mapping: new_source -> old_source
+                new_to_old = {}
+                for old, new in linkage.items():
+                    new_to_old[new] = old
+                state = package['best_state'] if self.args.continue_best else package['state']
+                for key in state.keys():
+                    if "decoder.0.conv_tr" in key or "decoder.0.rewrite" in key:
+                        tensor = state[key]
+                        if tensor.ndim >= 1:
+                            old_out = tensor.shape[0]
+                            if old_out % len(old_sources) == 0:
+                                block = old_out // len(old_sources)
+                                new_out_expected = block * len(new_sources)
+                                if key in self.model.state_dict():
+                                    new_shape = self.model.state_dict()[key].shape
+                                    if new_shape[0] == new_out_expected:
+                                        new_tensor = tensor.new_zeros(new_shape)
+                                        for j, new_src in enumerate(new_sources):
+                                            if new_src in new_to_old:
+                                                old_src = new_to_old[new_src]
+                                                old_index = old_sources.index(old_src)
+                                                new_tensor[j*block:(j+1)*block] = tensor[old_index*block:(old_index+1)*block]
+                                            else:
+                                                new_tensor[j*block:(j+1)*block] = self.model.state_dict()[key][j*block:(j+1)*block]
+                                        state[key] = new_tensor
+                if self.args.continue_best:
+                    package['best_state'] = state
+                else:
+                    package['state'] = state
+            self.best_state = package['best_state']
             if self.args.continue_best:
-                self.model.load_state_dict(package.get('best_state', state), strict=False)
+                self.model.load_state_dict(package['best_state'], strict=False)
             else:
-                self.model.load_state_dict(state, strict=False)
+                self.model.load_state_dict(package['state'], strict=False)
             if self.args.continue_opt:
-                self.optimizer.load_state_dict(package.get('optimizer', {}))
+                self.optimizer.load_state_dict(package['optimizer'])
 
     def _format_train(self, metrics: dict) -> dict:
         """Formatting for train/valid metrics."""
