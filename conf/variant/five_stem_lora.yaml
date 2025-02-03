@@ -2,21 +2,20 @@
 
 defaults:
   - _self_
-  - dset: musdb44
-  - svd: default
-  - variant: default
-  - override hydra/hydra_logging: colorlog
-  - override hydra/job_logging: colorlog
+  - ../dset/musdb44
+  - ../svd/default
 
 # Dataset configuration
 dset:
   sources: ["other", "kick", "vocals", "bass", "hihat"]
   # musdb: /checkpoint/defossez/datasets/musdbhq  # Base dataset path
   musdb_samplerate: 44100
-  use_musdb: false   # Set to false since we're using custom dataset
-  wav: "demucs_LoRa/dataset"  # Set your dataset path here - Is it correct to use the relative path or should I use this absolute path: '/workspace/demucs_LoRa/demucs_LoRa/dataset'
+  use_musdb: false   # Set to false since we're using a custom dataset
+  # Use a relative path that is correct when running from the 'demucs_LoRa' folder.
+  # If your working directory is 'demucs_LoRa', then "./dataset" resolves to '/workspace/Demucs_Training_main/demucs_LoRa/dataset'
+  wav: "./dataset"
   wav2:  # Optional second dataset
-  segment: 12  # Segment length in seconds # Not sure whether this should be used for the 5 stem LoRA training
+  segment: 12  # Segment length in seconds; adjust if needed for 5-stem LoRA training
   shift: 1
   train_valid: false
   full_cv: true
@@ -30,11 +29,11 @@ dset:
 continue_from: "htdemucs"  # Continue from pre-trained HTDemucs
 continue_pretrained: null  # No additional pretrained model
 continue_best: true       # Use best checkpoint
-continue_opt: false      # Don't continue optimizer state
+continue_opt: false       # Do not continue optimizer state
 
 # Training settings
 epochs: 360
-batch_size: 32
+batch_size: 16
 max_batches: null
 mixed_precision: true
 
@@ -128,7 +127,6 @@ htdemucs:
   t_sparsity: 0.95          # Sparsity level
   t_auto_sparsity: false
   t_cross_first: false
-
   
   # LoRA specific settings
   lora_rank: 8              # Base rank for LoRA adaptation
@@ -138,9 +136,9 @@ htdemucs:
     "encoder.0.*": 16       # Initial feature extraction
     "encoder.1.*": 12       # Early processing
     "transformer.*": 12     # Transformer layers
-    "decoder.0.*": 12      # High-level reconstruction
-    "decoder.1.*": 8       # Mid-level details
-    "decoder.2.*": 6       # Fine details
+    "decoder.0.*": 12       # High-level reconstruction
+    "decoder.1.*": 8        # Mid-level details
+    "decoder.2.*": 6        # Fine details
   lora_rank_mode: "heuristic"  # Rank allocation strategy
   
   # Memory optimization
@@ -152,7 +150,7 @@ htdemucs:
 
 # Training settings
 training:
-  batch_size: 32
+  batch_size: 1
   gradient_clip: 0.5
   mixed_precision: true
   epochs: 360
@@ -161,7 +159,7 @@ training:
     warmup_steps: 1000
     scheduler: cosine
 
- SVD settings for LoRA
+# SVD settings for LoRA
 svd:
   penalty: 0
   min_size: 0.1
@@ -183,7 +181,7 @@ quant:
 # Output and logging
 dora:
   dir: outputs
-  exclude: ["misc.*", "slurm.*", 'test.reval', 'flag', 'dset.backend']
+  exclude: ["misc.*", "slurm.*", "test.reval", "flag", "dset.backend"]
 
 # Cluster settings if using SLURM
 slurm:

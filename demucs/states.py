@@ -93,6 +93,47 @@ def get_state(model, quantizer, half=False):
     return state
 
 
+def transform_state(state, model):
+    import torch
+    model_keys = set(model.state_dict().keys())
+    new_state = {}
+    for key, value in state.items():
+        if key in model_keys:
+            new_state[key] = value
+        else:
+            if key.endswith(".weight"):
+                if ".conv.weight" in key:
+                    new_key = key.replace(".conv.weight", ".conv.base_conv.weight")
+                    if new_key in model_keys:
+                        new_state[new_key] = value
+                        continue
+                if ".rewrite.weight" in key:
+                    new_key = key.replace(".rewrite.weight", ".rewrite.base_conv.weight")
+                    if new_key in model_keys:
+                        if value.dim() == 4 and model.state_dict()[new_key].shape[2] == 1 and value.shape[2] == 3:
+                            value = value[:, :, 1:2, :]
+                        new_state[new_key] = value
+                        continue
+            if key.endswith(".bias"):
+                if ".conv.bias" in key:
+                    new_key = key.replace(".conv.bias", ".conv.base_conv.bias")
+                    if new_key in model_keys:
+                        new_state[new_key] = value
+                        continue
+                if ".rewrite.bias" in key:
+                    new_key = key.replace(".rewrite.bias", ".rewrite.base_conv.bias")
+                    if new_key in model_keys:
+                        new_state[new_key] = value
+                        continue
+            # If key doesn't match any pattern, skip mapping
+    for key in model_keys:
+        if key not in new_state:
+            if "lora" in key or key.endswith("conv.U") or key.endswith("conv.V"):
+                new_state[key] = torch.zeros_like(model.state_dict()[key])
+            else:
+                new_state[key] = model.state_dict()[key]
+    return new_state
+
 def set_state(model, state, quantizer=None):
     """Set the state on a given model."""
     if state.get('__quantized'):
@@ -103,7 +144,8 @@ def set_state(model, state, quantizer=None):
             from diffq import restore_quantized_state
             restore_quantized_state(model, state)
     else:
-        model.load_state_dict(state)
+        new_state = transform_state(state, model)
+        model.load_state_dict(new_state, strict=False)
     return state
 
 

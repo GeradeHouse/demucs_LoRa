@@ -108,7 +108,7 @@ class Solver(object):
             self.model.load_state_dict(package['state'])
             self.optimizer.load_state_dict(package['optimizer'])
             self.history[:] = package['history']
-            self.best_state = package['best_state']
+            self.best_state = package.get('best_state', package['state'])
             for kind, emas in self.emas.items():
                 for k, ema in enumerate(emas):
                     ema.load_state_dict(package[f'ema_{kind}_{k}'])
@@ -123,13 +123,14 @@ class Solver(object):
             cf = root / str(self.args.continue_from) / name
             logger.info("Loading from %s", cf)
             package = torch.load(cf, 'cpu')
-            self.best_state = package['best_state']
+            state = package.get('state', package)
+            self.best_state = package.get('best_state', state)
             if self.args.continue_best:
-                self.model.load_state_dict(package['best_state'], strict=False)
+                self.model.load_state_dict(package.get('best_state', state), strict=False)
             else:
-                self.model.load_state_dict(package['state'], strict=False)
+                self.model.load_state_dict(state, strict=False)
             if self.args.continue_opt:
-                self.optimizer.load_state_dict(package['optimizer'])
+                self.optimizer.load_state_dict(package.get('optimizer', {}))
 
     def _format_train(self, metrics: dict) -> dict:
         """Formatting for train/valid metrics."""
