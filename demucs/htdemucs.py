@@ -202,10 +202,9 @@ class LoRALayerBase(nn.Module):
             raise ValueError(f"LoRA rank must be ≥1, got {self.rank}")
         # Check rank doesn't exceed matrix dimensions to avoid zero-sized tensors
         if self.rank > min(fan_in, fan_out):
-            raise ValueError(
-                f"LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})="
-                f"{min(fan_in, fan_out)}. This would create zero-dimension matrices."
-            )
+            new_rank = min(fan_in, fan_out)
+            print(f"Warning: LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})={new_rank}. Clamping to {new_rank}.")
+            self.rank = new_rank
         # Validate alpha is non-negative and properly scaled for stable updates
         if self.alpha < 0:
             raise ValueError(f"LoRA alpha must be ≥0, got {self.alpha}")
@@ -687,7 +686,9 @@ class DConv(nn.Module):
     
     Both convolution operations are wrapped with LoRA for efficient fine-tuning.
     """
-    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0):
+    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0, **kwargs):
+        if kwargs:
+            print("Ignoring extra parameters:", kwargs)
         super().__init__()
         
         # Create depthwise convolution (one filter per channel)
@@ -1959,7 +1960,7 @@ class HDecLayer(nn.Module):
                     padding=(0, context)
                 )
             elif freq:
-                rewrite_conv = nn.Conv2d(chin, 2 * chin, 1, 1)
+                rewrite_conv = nn.Conv2d(chin, 2 * chin, kernel_size=3, stride=1, padding=1)
             else:
                 rewrite_conv = nn.Conv1d(chin, 2 * chin, 1 + 2 * context, 1, context)
             

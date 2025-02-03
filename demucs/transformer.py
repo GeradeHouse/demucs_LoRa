@@ -292,8 +292,13 @@ class MyTransformerEncoderLayer(nn.TransformerEncoderLayer):
         auto_sparsity=False,
         sparsity=0.95,
         batch_first=False,
+        **kwargs
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
+        # Pop and ignore extra LoRA-specific parameters.
+        kwargs.pop("lora_rank", None)
+        kwargs.pop("lora_alpha", None)
+        kwargs.pop("lora_dropout", None)
         super().__init__(
             d_model=d_model,
             nhead=nhead,
@@ -317,7 +322,6 @@ class MyTransformerEncoderLayer(nn.TransformerEncoderLayer):
         if group_norm:
             self.norm1 = MyGroupNorm(int(group_norm), d_model, eps=layer_norm_eps, **factory_kwargs)
             self.norm2 = MyGroupNorm(int(group_norm), d_model, eps=layer_norm_eps, **factory_kwargs)
-
         self.norm_out = None
         if self.norm_first & norm_out:
             self.norm_out = MyGroupNorm(num_groups=int(norm_out), num_channels=d_model)
@@ -327,12 +331,13 @@ class MyTransformerEncoderLayer(nn.TransformerEncoderLayer):
         self.gamma_2 = (
             LayerScale(d_model, init_values, True) if layer_scale else nn.Identity()
         )
-
         if sparse:
             self.self_attn = MultiheadAttention(
                 d_model, nhead, dropout=dropout, batch_first=batch_first,
                 auto_sparsity=sparsity if auto_sparsity else 0,
             )
+            self.__setattr__("src_mask", torch.zeros(1, 1))
+            self.mask_random_seed = mask_random_seed
             self.__setattr__("src_mask", torch.zeros(1, 1))
             self.mask_random_seed = mask_random_seed
 
@@ -713,7 +718,10 @@ class CrossTransformerEncoder(nn.Module):
         kwargs_cross_encoder.update({
             "sparse": sparse_cross_attn,
         })
-
+        kwargs_cross_encoder.pop("lora_rank", None)
+        kwargs_cross_encoder.pop("lora_alpha", None)
+        kwargs_cross_encoder.pop("lora_dropout", None)
+        
         for idx in range(num_layers):
             if idx % 2 == self.classic_parity:
 
