@@ -132,11 +132,235 @@ htdemucs:
   lora_rank: 8              # Base rank for LoRA adaptation
   lora_alpha: 1.0           # Scaling factor for updates
   lora_dropout: 0.1         # Dropout for regularization
+  
+  # Source linkage settings:
+  # This mapping defines how the pretrained model's 4 sources are linked to the 5-source configuration.
+  # The pretrained sources are: "other", "drums", "vocals", "bass". They are mapped as follows:
+  #   - "other" is linked to "other"
+  #   - "drums" is linked to "kick" (since in the new setup the drum component is split)
+  #   - "vocals" is linked to "vocals"
+  #   - "bass" is linked to "bass"
+  # The new source "hihat" is explicitly listed as new (i.e. not linked) and will be trained from scratch.
   source_linkage:
     other: other
     drums: kick
     vocals: vocals
     bass: bass
+    hihat: new
+  
+  layer_ranks:              # Layer-specific ranks
+    "encoder.0.*": 16       # Initial feature extraction
+    "encoder.1.*": 12       # Early processing
+    "transformer.*": 12     # Transformer layers
+    "decoder.0.*": 12       # High-level reconstruction
+    "decoder.1.*": 8        # Mid-level details
+    "decoder.2.*": 6        # Fine details
+  lora_rank_mode: "heuristic"  # Rank allocation strategy
+  
+  # Memory optimization
+  enable_checkpointing: true   # For large models
+  enable_profiling: false      # Memory tracking
+  
+  # Weight initialization
+  rescale: 0.1               # Weight rescaling factor
+
+# Training settings
+training:
+  batch_size: 1
+  gradient_clip: 0.5
+  mixed_precision: true
+  epochs: 360
+  optim:
+    lr: 5e-5
+    warmup_steps: 1000
+    scheduler: cosine
+
+# SVD settings for LoRA
+svd:
+  penalty: 0
+  min_size: 0.1
+  dim: 1
+  niters: 2
+  powm: false
+  proba: 1
+  conv_only: false
+  convtr: false
+  bs: 1
+
+# Quantization settings (typically not used during training)
+quant:
+  diffq: null
+  qat: null
+  min_size: 0.2
+  group_size: 8
+
+# Output and logging
+dora:
+  dir: outputs
+  exclude: ["misc.*", "slurm.*", "test.reval", "flag", "dset.backend"]
+
+# Cluster settings if using SLURM
+slurm:
+  time: 4320
+  constraint: volta32gb
+  setup: ['module load cudnn/v8.4.1.50-cuda.11.6 NCCL/2.11.4-6-cuda.11.6 cuda/11.6']
+
+# Logging configuration
+hydra:
+  job_logging:
+    formatters:
+      colorlog:
+        datefmt: "%m-%d %H:%M:%S"
+# @package _global_
+
+defaults:
+  - _self_
+  - ../dset/musdb44
+  - ../svd/default
+
+# Dataset configuration
+dset:
+  sources: ["other", "kick", "vocals", "bass", "hihat"]
+  # musdb: /checkpoint/defossez/datasets/musdbhq  # Base dataset path
+  musdb_samplerate: 44100
+  use_musdb: false   # Set to false since we're using a custom dataset
+  # Use a relative path that is correct when running from the 'demucs_LoRa' folder.
+  # If your working directory is 'demucs_LoRa', then "./dataset" resolves to '/workspace/Demucs_Training_main/demucs_LoRa/dataset'
+  wav: "./dataset"
+  wav2:  # Optional second dataset
+  segment: 12  # Segment length in seconds; adjust if needed for 5-stem LoRA training
+  shift: 1
+  train_valid: false
+  full_cv: true
+  samplerate: 44100
+  channels: 2
+  normalize: true
+  metadata: ./metadata
+  valid_samples: null
+
+# Model and training configuration
+continue_from: "htdemucs"  # Continue from pre-trained HTDemucs
+continue_pretrained: null  # No additional pretrained model
+continue_best: true       # Use best checkpoint
+continue_opt: false       # Do not continue optimizer state
+
+# Training settings
+epochs: 360
+batch_size: 16
+max_batches: null
+mixed_precision: true
+
+# Optimizer settings
+optim:
+  lr: 5e-5              # Lower learning rate for fine-tuning
+  momentum: 0.9
+  beta2: 0.999
+  loss: l1              # L1 loss typically better for audio
+  optim: adam
+  weight_decay: 0
+  clip_grad: 0.5
+  warmup_steps: 1000
+  scheduler: cosine
+
+# HTDemucs model configuration
+htdemucs:
+  # Core architecture
+  channels: 48              # Base number of channels
+  channels_time: null       # Time branch channels
+  growth: 2                 # Channel growth factor
+  depth: 4                  # Number of layers
+  
+  # STFT and processing
+  nfft: 4096               # FFT size for better frequency resolution
+  wiener_iters: 0          # Number of Wiener filter iterations
+  end_iters: 0             # Iterations during training
+  wiener_residual: false   # Add residual source before Wiener
+  cac: true                # Complex as channels mode
+  
+  # Architecture features
+  rewrite: true            # Add 1x1 convolutions to each layer
+  multi_freqs: []          # Frequency band splitting
+  multi_freqs_depth: 3     # Depth for multi-frequency processing
+  freq_emb: 0.2           # Frequency embedding weight
+  emb_scale: 10           # Embedding learning rate scale
+  emb_smooth: true        # Initialize with smooth embedding
+  
+  # Convolution settings
+  kernel_size: 8          # Kernel size for encoder/decoder
+  stride: 4              # Stride for frequency layers
+  time_stride: 2         # Stride for final time layer
+  context: 1             # Context for decoder 1x1 conv
+  context_enc: 0         # Context for encoder 1x1 conv
+  
+  # Normalization
+  norm_starts: 4         # Layer where group norm starts
+  norm_groups: 4         # Number of groups for group norm
+  
+  # DConv settings
+  dconv_mode: 1          # 1=encoder only, 2=decoder only, 3=both
+  dconv_depth: 2         # Depth of residual DConv branch
+  dconv_comp: 8          # Compression of DConv branch
+  dconv_init: 1e-3       # Initial scale for DConv LayerScale
+  
+  # Transformer settings
+  bottom_channels: 0      # Channels before transformer
+  t_layers: 5            # Number of transformer layers
+  t_hidden_scale: 4.0    # Hidden layer scale
+  t_heads: 8            # Number of attention heads
+  t_dropout: 0.0        # Transformer dropout
+  t_layer_scale: true   # Use layer scale in transformer
+  t_gelu: true         # Use GELU activation
+  
+  # Positional embedding
+  t_emb: "sin"          # Positional embedding type
+  t_max_positions: 10000 # Max positions for scaled embedding
+  t_max_period: 10000.0  # Max period for sin embedding
+  t_weight_pos_embed: 1.0 # Position embedding weight
+  t_cape_mean_normalize: true
+  t_cape_augment: true
+  t_cape_glob_loc_scale: [5000.0, 1.0, 1.4]
+  t_sin_random_shift: 0
+  
+  # Transformer normalization
+  t_norm_in: true       # Norm before transformer
+  t_norm_in_group: false # Group norm across time
+  t_group_norm: false   # Group norm in encoder layers
+  t_norm_first: true    # Norm before attention
+  t_norm_out: true      # Final group norm
+  t_weight_decay: 0.0
+  t_lr: null
+  
+  # Sparsity settings
+  t_sparse_self_attn: false  # Sparse self attention
+  t_sparse_cross_attn: false # Sparse cross attention
+  t_mask_type: "diag"        # Attention mask type
+  t_mask_random_seed: 42     # Random seed for mask
+  t_sparse_attn_window: 500  # Local attention window
+  t_global_window: 100       # Global attention window
+  t_sparsity: 0.95          # Sparsity level
+  t_auto_sparsity: false
+  t_cross_first: false
+  
+  # LoRA specific settings
+  lora_rank: 8              # Base rank for LoRA adaptation
+  lora_alpha: 1.0           # Scaling factor for updates
+  lora_dropout: 0.1         # Dropout for regularization
+  
+  # Source linkage settings:
+  # This mapping defines how the pretrained model's 4 sources are linked to the 5-source configuration.
+  # The pretrained sources are: "other", "drums", "vocals", "bass". They are mapped as follows:
+  #   - "other" is linked to "other"
+  #   - "drums" is linked to "kick" (since in the new setup the drum component is split)
+  #   - "vocals" is linked to "vocals"
+  #   - "bass" is linked to "bass"
+  # The new source "hihat" is explicitly listed as new (i.e. not linked) and will be trained from scratch.
+  source_linkage:
+    other: other
+    drums: kick
+    vocals: vocals
+    bass: bass
+    hihat: new
+  
   layer_ranks:              # Layer-specific ranks
     "encoder.0.*": 16       # Initial feature extraction
     "encoder.1.*": 12       # Early processing
