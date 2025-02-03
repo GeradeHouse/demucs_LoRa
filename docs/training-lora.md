@@ -90,7 +90,7 @@ For 5-source separation with specialized drum components:
 
 ```yaml
 dset:
-  sources: ["other", "kick", "vocal", "bass", "hihat"]  # 5-source configuration
+  sources: ["other", "kick", "vocals", "bass", "hihat"]  # 5-source configuration
   sample_rate: 44100  # Match your audio files
   channels: 2  # Stereo processing
   
@@ -165,7 +165,7 @@ dora run -d -f htdemucs \
    │   │   ├── mixture.wav        # Original mixed track
    │   │   ├── other.wav         # All instruments except drums/bass
    │   │   ├── kick.wav          # All drums except hi-hats
-   │   │   ├── vocal.wav         # All vocal elements
+   │   │   ├── vocals.wav         # All vocal elements
    │   │   ├── bass.wav          # Bass instruments
    │   │   └── hihat.wav         # Hi-hat patterns only
    │   ├── track2/

@@ -10,7 +10,7 @@ defaults:
 
 # Dataset configuration
 dset:
-  sources: ["other", "kick", "vocal", "bass", "hihat"]
+  sources: ["other", "kick", "vocals", "bass", "hihat"]
   # musdb: /checkpoint/defossez/datasets/musdbhq  # Base dataset path
   musdb_samplerate: 44100
   use_musdb: false   # Set to false since we're using custom dataset
