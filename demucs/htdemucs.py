@@ -191,7 +191,7 @@ class LoRALayerBase(nn.Module):
         super().__init__()
         self.rank = rank                # Rank determines the dimensionality of the low-rank update matrices  
         self.alpha = alpha              # Alpha scales the magnitude of LoRA updates
-        self.dropout = dropout          # Dropout rate for regularization
+        self.dropout = dropout          # Dropout rate for regularization during training
         self.lora_enabled = True        # Flag to enable/disable LoRA adaptations at runtime
         self.enable_profiling = False   # Not used inside each forward anymore
         
@@ -687,7 +687,9 @@ class DConv(nn.Module):
     
     Both convolution operations are wrapped with LoRA for efficient fine-tuning.
     """
-    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0):
+    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0, **kwargs):
+        if kwargs:
+            print("Ignoring extra parameters:", kwargs)
         super().__init__()
         
         # Create depthwise convolution (one filter per channel)
@@ -929,6 +931,8 @@ class HTDemucs(nn.Module):
             dconv_mode: if 1: dconv in encoder only, 2: decoder only, 3: both.
             dconv_depth: depth of residual DConv branch.
             dconv_comp: compression of DConv branch.
+            dconv_attn: adds attention layers in DConv branch starting at this layer.
+            dconv_lstm: adds a LSTM layer in DConv branch starting at this layer.
             dconv_init: initial scale for the DConv branch LayerScale.
             bottom_channels: if >0 it adds a linear layer (1x1 Conv) before and after the
                 transformer in order to change the number of channels
@@ -1957,7 +1961,7 @@ class HDecLayer(nn.Module):
                     padding=(0, context)
                 )
             elif freq:
-                rewrite_conv = nn.Conv2d(chin, 2 * chin, 1, 1)
+                rewrite_conv = nn.Conv2d(chin, 2 * chin, kernel_size=3, stride=1, padding=1)
             else:
                 rewrite_conv = nn.Conv1d(chin, 2 * chin, 1 + 2 * context, 1, context)
             
