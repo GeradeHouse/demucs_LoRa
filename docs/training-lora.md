@@ -810,8 +810,28 @@ class CustomLoRAConfig:
         return int(self.base_rank * (self.rank_growth ** layer_depth))
 ```
 
-### Gradient-Based Rank Adaptation
+### Heuristic and Gradient-Based Rank Adaptation
 
+Below is an explanation of the two modes along with a recommendation:
+
+**Heuristic Mode:**  
+A simple, rule-based approach to assigning ranks to each layer:
+```yaml
+htdemucs.lora_rank_mode: heuristic
+htdemucs.lora_rank_adaptation: false
+```
+
+- **What It Does:**  
+  In heuristic mode, the LoRA rank for each layer is determined by a predefined rule based on the layer’s role or position in the network (for example, using higher ranks for critical layers like early encoders or transformer layers, and lower ranks for later refinement layers).  
+- **How It Works:**  
+  The configuration uses a fixed, rule‐based mapping (for example, doubling the default rank in the first encoder layer or using specific values for decoder layers) as specified in the configuration (here, `"lora_rank_mode": "heuristic"`).  
+- **Pros:**  
+  - Simple and predictable.  
+  - Requires no additional computational overhead or hyperparameter tuning during training.  
+  - Works well in many practical fine-tuning scenarios.
+
+
+**Gradient Mode:**  
 An experimental mode that adjusts ranks dynamically based on gradient signals:
 ```yaml
 htdemucs.lora_rank_mode: gradient
@@ -819,6 +839,26 @@ htdemucs.lora_rank_adaptation: true
 htdemucs.min_rank: 2
 htdemucs.max_rank: 16
 ```
+
+- **What It Does:**  
+  In gradient mode, the model dynamically adjusts the LoRA ranks during training based on gradient signals. The idea is to allocate more capacity (i.e. higher rank) to layers that are more “sensitive” (have larger or more significant gradients) and less capacity to others.  
+- **How It Works:**  
+  When activated (e.g. by setting `"lora_rank_mode": "gradient"` and enabling `"lora_rank_adaptation": true` along with specifying `"min_rank"` and `"max_rank"`), the system monitors gradient magnitudes during training and adapts the effective rank of the low-rank updates accordingly.
+- **Pros:**  
+  - Provides a form of adaptive capacity that can potentially yield better fine-tuning performance by tailoring adaptation to each layer’s needs.
+  - May be beneficial when the optimal rank varies across layers or when there is uncertainty about what fixed ranks to choose.
+
+- **Cons:**  
+  - It is experimental and may require careful tuning of the additional hyperparameters (such as minimum and maximum ranks).
+  - Introduces some extra computational overhead and complexity in the training loop.
+  - May be less stable than the fixed heuristic approach in certain scenarios.
+
+**Which One to Use?**
+
+For most fine-tuning scenarios—especially when you are adapting a pretrained model (in your case, transitioning from a 4-source to a 5-source configuration) with a relatively small dataset—the **heuristic mode** is generally recommended. It is more straightforward and has been shown to work well without the added complexity of dynamically adapting ranks. 
+
+The gradient mode is experimental and might provide improvements in some cases but also introduces extra complexity and potential instability. If you are new to fine-tuning or if your primary goal is to reliably adapt a pretrained model with minimal fuss, sticking with the **heuristic** approach (as specified by `"lora_rank_mode": "heuristic"`) is advisable.
+
 
 ---
 
