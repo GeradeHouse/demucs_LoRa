@@ -191,7 +191,7 @@ class LoRALayerBase(nn.Module):
         super().__init__()
         self.rank = rank                # Rank determines the dimensionality of the low-rank update matrices  
         self.alpha = alpha              # Alpha scales the magnitude of LoRA updates
-        self.dropout = dropout          # Dropout rate for regularization during training
+        self.dropout = dropout          # Dropout rate for regularization
         self.lora_enabled = True        # Flag to enable/disable LoRA adaptations at runtime
         self.enable_profiling = False   # Not used inside each forward anymore
         
@@ -202,9 +202,10 @@ class LoRALayerBase(nn.Module):
             raise ValueError(f"LoRA rank must be ≥1, got {self.rank}")
         # Check rank doesn't exceed matrix dimensions to avoid zero-sized tensors
         if self.rank > min(fan_in, fan_out):
-            new_rank = min(fan_in, fan_out)
-            print(f"Warning: LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})={new_rank}. Clamping to {new_rank}.")
-            self.rank = new_rank
+            raise ValueError(
+                f"LoRA rank {self.rank} exceeds min(fan_in={fan_in}, fan_out={fan_out})="
+                f"{min(fan_in, fan_out)}. This would create zero-dimension matrices."
+            )
         # Validate alpha is non-negative and properly scaled for stable updates
         if self.alpha < 0:
             raise ValueError(f"LoRA alpha must be ≥0, got {self.alpha}")
@@ -686,9 +687,7 @@ class DConv(nn.Module):
     
     Both convolution operations are wrapped with LoRA for efficient fine-tuning.
     """
-    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0, **kwargs):
-        if kwargs:
-            print("Ignoring extra parameters:", kwargs)
+    def __init__(self, channels: int, kernel_size=3, layer_name: str = "", default_rank: int = 4, layer_ranks: dict = None, lora_alpha=1.0, dropout=0.0):
         super().__init__()
         
         # Create depthwise convolution (one filter per channel)
@@ -907,11 +906,11 @@ class HTDemucs(nn.Module):
                 various shape parameters and will not work out of the box for hybrid models.
             wiener_iters: when using Wiener filtering, number of iterations at test time.
             end_iters: same but at train time. For a hybrid model, must be equal to `wiener_iters`.
-            wiener_residual: add residual source before wiener filtering.
+            wiener_residual: add residual source before Wiener filtering.
             cac: uses complex as channels, i.e. complex numbers are 2 channels each
                 in input and output. no further processing is done before ISTFT.
             depth (int): number of layers in the encoder and in the decoder.
-            rewrite (bool): add 1x1 convolution to each layer.
+            rewrite (bool): add 1x1 conv to each layer.
             multi_freqs: list of frequency ratios for splitting frequency bands with `MultiWrap`.
             multi_freqs_depth: how many layers to wrap with `MultiWrap`. Only the outermost
                 layers will be wrapped.
@@ -930,8 +929,6 @@ class HTDemucs(nn.Module):
             dconv_mode: if 1: dconv in encoder only, 2: decoder only, 3: both.
             dconv_depth: depth of residual DConv branch.
             dconv_comp: compression of DConv branch.
-            dconv_attn: adds attention layers in DConv branch starting at this layer.
-            dconv_lstm: adds a LSTM layer in DConv branch starting at this layer.
             dconv_init: initial scale for the DConv branch LayerScale.
             bottom_channels: if >0 it adds a linear layer (1x1 Conv) before and after the
                 transformer in order to change the number of channels
@@ -1867,7 +1864,7 @@ class HEncLayer(nn.Module):
             if self.freq:  # Reshape for frequency processing
                 B, C, Fr, T = y.shape  # [batch, channels, freq, time]
                 y = y.permute(0, 2, 1, 3).reshape(-1, C, T)  # Prepare for DConv
-            y = self.dconv(y)  # Apply depthwise-separable convolution
+            y = self.dconv(y)  # Apply depth-wise convolution
             if self.freq:  # Restore original shape
                 y = y.view(B, Fr, C, T).permute(0, 2, 1, 3)
         
@@ -1960,7 +1957,7 @@ class HDecLayer(nn.Module):
                     padding=(0, context)
                 )
             elif freq:
-                rewrite_conv = nn.Conv2d(chin, 2 * chin, kernel_size=3, stride=1, padding=1)
+                rewrite_conv = nn.Conv2d(chin, 2 * chin, 1, 1)
             else:
                 rewrite_conv = nn.Conv1d(chin, 2 * chin, 1 + 2 * context, 1, context)
             
